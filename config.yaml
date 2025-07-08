@@ -1,0 +1,178 @@
+# config.yaml
+# OpenAI Responses API デモアプリケーションの設定ファイル
+# モデル設定
+models:
+  default: "gpt-4o-mini"
+  available:
+    - "gpt-4o"
+    - "gpt-4o-mini"
+    - "gpt-4o-audio-preview"
+    - "gpt-4o-mini-audio-preview"
+    - "gpt-4.1"
+    - "gpt-4.1-mini"
+    - "o3-mini"
+    - "o4-mini"
+    - "o1-mini"
+    - "o4"
+    - "o3"
+    - "o1"
+
+# モデル料金設定（1000トークンあたりのドル）
+model_pricing:
+  gpt-4o:
+    input: 0.005
+    output: 0.015
+  gpt-4o-mini:
+    input: 0.00015
+    output: 0.0006
+  gpt-4o-audio-preview:
+    input: 0.01
+    output: 0.02
+  gpt-4o-mini-audio-preview:
+    input: 0.00025
+    output: 0.001
+  gpt-4.1:
+    input: 0.0025
+    output: 0.01
+  gpt-4.1-mini:
+    input: 0.0001
+    output: 0.0004
+  o1:
+    input: 0.015
+    output: 0.06
+  o1-mini:
+    input: 0.003
+    output: 0.012
+  o3:
+    input: 0.03
+    output: 0.12
+  o3-mini:
+    input: 0.006
+    output: 0.024
+  o4:
+    input: 0.05
+    output: 0.20
+  o4-mini:
+    input: 0.01
+    output: 0.04
+
+# API設定
+api:
+  timeout: 30
+  max_retries: 3
+  retry_delay: 1
+  max_tokens: 4096
+
+# アプリケーション設定
+app:
+  demo_categories:
+    - name: "基本機能"
+      demos:
+        - "simple_chat"
+        - "structured_output"
+        - "function_calling"
+    - name: "高度な機能"
+      demos:
+        - "vision"
+        - "audio"
+        - "streaming"
+    - name: "ユーティリティ"
+      demos:
+        - "token_counter"
+        - "model_comparison"
+
+  demo_titles:
+    simple_chat: "シンプルチャット"
+    structured_output: "構造化出力"
+    function_calling: "関数呼び出し"
+    vision: "画像認識"
+    audio: "音声処理"
+    streaming: "ストリーミング"
+    token_counter: "トークンカウンター"
+    model_comparison: "モデル比較"
+
+# サンプルデータ
+samples:
+  image_url: "https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Gfp-wisconsin-madison-the-nature-boardwalk.jpg/2560px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg"
+  event_example: "台湾フェス2025 ～あつまれ！究極の台湾グルメ～ in Kawasaki Spark"
+  weather_query: "週末の東京の天気とおすすめの屋内アクティビティは？"
+  responses_query: "OpenAIのAPIで、responses.createを説明しなさい。"
+  code_query: "Pythonで素数を判定する関数を作成してください。"
+  analysis_query: "最近のAI技術のトレンドを3つ教えてください。"
+
+# ファイルパス
+paths:
+  cities_csv: "data/cities_list.csv"
+  images_dir: "images"
+  datasets_dir: "datasets"
+  logs_dir: "logs"
+  cache_dir: "cache"
+
+# UI設定
+ui:
+  page_title: "ChatGPT Responses API Demo"
+  page_icon: "🤖"
+  layout: "wide"
+  text_area_height: 75
+  max_file_search_results: 20
+  sidebar_width: 300
+  message_display_limit: 50
+
+  # テーマ設定
+  theme:
+    primary_color: "#FF4B4B"
+    background_color: "#FFFFFF"
+    secondary_background_color: "#F0F2F6"
+    text_color: "#262730"
+    font: "sans serif"
+
+# デフォルトメッセージ
+default_messages:
+  developer: |
+    You are a strong developer and good at teaching software developer professionals
+    please provide an up-to-date, informed overview of the API by function, then show
+    cookbook programs for each, and explain the API options.
+    あなたは強力な開発者でありソフトウェア開発者の専門家に教えるのが得意です。
+    OpenAIのAPIを機能別に最新かつ詳細に説明してください。
+    それぞれのAPIのサンプルプログラムを示しAPIのオプションについて説明してください。
+
+  user: |
+    Organize and identify the problem and list the issues.
+    Then, provide a solution procedure for the issues you have organized and identified,
+    and solve the problems/issues according to the solution procedures.
+    不具合、問題を特定し、整理して箇条書きで列挙・説明してください。
+    次に、整理・特定した問題点の解決手順を示しなさい。
+    次に、解決手順に従って問題・課題を解決してください。
+
+  assistant: |
+    OpenAIのAPIを使用するには、公式openaiライブラリが便利です。回答は日本語で
+
+# エラーメッセージ
+error_messages:
+  api_key_missing: "APIキーが設定されていません。環境変数を確認してください。"
+  file_not_found: "ファイルが見つかりません: {filename}"
+  parse_error: "データの解析に失敗しました。形式を確認してください。"
+  network_error: "ネットワークエラーが発生しました。接続を確認してください。"
+  model_not_supported: "このモデルはサポートされていません: {model}"
+  token_limit_exceeded: "トークン数が上限を超えています。"
+
+# ロギング設定
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "app.log"
+  max_bytes: 10485760  # 10MB
+  backup_count: 5
+
+# キャッシュ設定
+cache:
+  enabled: true
+  ttl: 3600  # 1時間
+  max_size: 100  # 最大100エントリ
+
+# 実験的機能
+experimental:
+  enable_beta_features: false
+  debug_mode: false
+  performance_monitoring: true
+
