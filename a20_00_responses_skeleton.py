@@ -60,12 +60,12 @@ class InfoPanelManager:
             # メトリクス表示
             col1, col2 = st.columns(2)
             with col1:
-                st.metric("最大入力", f"{limits['max_tokens']:,}")
-                st.metric("最大出力", f"{limits['max_output']:,}")
+                st.write("最大入力", f"{limits['max_tokens']:,}")
+                st.write("最大出力", f"{limits['max_output']:,}")
             with col2:
                 if pricing:
-                    st.metric("入力料金", f"${pricing.get('input', 0):.5f}/1K")
-                    st.metric("出力料金", f"${pricing.get('output', 0):.5f}/1K")
+                    st.write("入力料金", f"${pricing.get('input', 0):.5f}/1K")
+                    st.write("出力料金", f"${pricing.get('output', 0):.5f}/1K")
 
             # モデルカテゴリ
             categories = config.get("models.categories", {})
@@ -105,7 +105,7 @@ class InfoPanelManager:
             # メモリ使用量（簡易）
             import sys
             session_size = sys.getsizeof(st.session_state)
-            st.metric("セッションサイズ", f"{session_size:,} bytes")
+            st.write("セッションサイズ", f"{session_size:,} bytes")
 
     @staticmethod
     def show_performance_info():
@@ -124,11 +124,11 @@ class InfoPanelManager:
 
                 col1, col2 = st.columns(2)
                 with col1:
-                    st.metric("平均", f"{avg_time:.2f}s")
-                    st.metric("最大", f"{max_time:.2f}s")
+                    st.write("平均", f"{avg_time:.2f}s")
+                    st.write("最大", f"{max_time:.2f}s")
                 with col2:
-                    st.metric("最小", f"{min_time:.2f}s")
-                    st.metric("実行回数", len(metrics))
+                    st.write("最小", f"{min_time:.2f}s")
+                    st.write("実行回数", len(metrics))
 
                 # 最新の実行時間
                 if metrics:
@@ -228,7 +228,7 @@ class ResponsesSkeletonDemo:
 
     def setup_sidebar(self, selected_model: str):
         """左サイドバーの設定"""
-        st.sidebar.title("📋 情報パネル")
+        st.sidebar.write("📋 情報パネル")
 
         # 各情報パネルを表示
         InfoPanelManager.show_model_info(selected_model)
@@ -399,11 +399,11 @@ class People(BaseModel):
                                 st.write(f"**Person {i}**")
                                 person_col1, person_col2, person_col3 = st.columns(3)
                                 with person_col1:
-                                    st.metric("名前", person.name)
+                                    st.write("名前", person.name)
                                 with person_col2:
-                                    st.metric("年齢", f"{person.age}歳")
+                                    st.write("年齢", f"{person.age}歳")
                                 with person_col3:
-                                    st.metric("居住地", person.city)
+                                    st.write("居住地", person.city)
                                 st.divider()
 
                     with col2:
@@ -474,7 +474,7 @@ class People(BaseModel):
                             "💾 保存"
                         )
                 with col3:
-                    st.metric("メッセージ数", len(messages))
+                    st.write("メッセージ数", len(messages))
             else:
                 st.info("会話履歴がありません")
 
