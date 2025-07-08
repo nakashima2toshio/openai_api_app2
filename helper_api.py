@@ -5,7 +5,10 @@ import re
 import time
 import json
 import logging
+from logging import Logger
+
 import yaml
+import os
 from typing import List, Dict, Any, Optional, Union, Tuple, Literal, Callable
 from pathlib import Path
 from dataclasses import dataclass
@@ -33,34 +36,6 @@ from openai.types.chat import (
     ChatCompletionMessageParam,
 )
 
-# ロギング設定
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
-
-# --------------------------------------------------
-# 定数定義
-# --------------------------------------------------
-developer_text = (
-    "You are a strong developer and good at teaching software developer professionals "
-    "please provide an up-to-date, informed overview of the API by function, then show "
-    "cookbook programs for each, and explain the API options."
-    "あなたは強力な開発者でありソフトウェア開発者の専門家に教えるのが得意です。"
-    "OpenAIのAPIを機能別に最新かつ詳細に説明してください。"
-    "それぞれのAPIのサンプルプログラムを示しAPIのオプションについて説明してください。"
-)
-user_text = (
-    "Organize and identify the problem and list the issues. "
-    "Then, provide a solution procedure for the issues you have organized and identified, "
-    "and solve the problems/issues according to the solution procedures."
-    "不具合、問題を特定し、整理して箇条書きで列挙・説明してください。"
-    "次に、整理・特定した問題点の解決手順を示しなさい。"
-    "次に、解決手順に従って問題・課題を解決してください。"
-)
-assistant_text = "OpenAIのAPIを使用するには、公式openaiライブラリが便利です。回答は日本語で"
-
 # Role型の定義
 RoleType = Literal["user", "assistant", "system", "developer"]
 
@@ -71,43 +46,126 @@ RoleType = Literal["user", "assistant", "system", "developer"]
 class ConfigManager:
     """設定ファイルの管理"""
 
+    _instance = None
+
+    def __new__(cls, config_path: str = "config.yaml"):
+        """シングルトンパターンで設定を管理"""
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
     def __init__(self, config_path: str = "config.yaml"):
+        if hasattr(self, '_initialized'):
+            return
+        self._initialized = True
         self.config_path = Path(config_path)
         self._config = self._load_config()
         self._cache = {}
+        self.logger = self._setup_logger()
+
+    def _setup_logger(self) -> logging.Logger:
+        """ロガーの設定"""
+        logger = logging.getLogger('openai_helper')
+
+        # 既に設定済みの場合はスキップ
+        if logger.handlers:
+            return logger
+
+        log_config = self.get("logging", {})
+        level = getattr(logging, log_config.get("level", "INFO"))
+        logger.setLevel(level)
+
+        # フォーマッターの設定
+        formatter = logging.Formatter(
+            log_config.get("format", "%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+        )
+
+        # コンソールハンドラー
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
+
+        # ファイルハンドラー（設定されている場合）
+        log_file = log_config.get("file")
+        if log_file:
+            file_handler = logging.handlers.RotatingFileHandler(
+                log_file,
+                maxBytes=log_config.get("max_bytes", 10485760),
+                backupCount=log_config.get("backup_count", 5)
+            )
+            file_handler.setFormatter(formatter)
+            logger.addHandler(file_handler)
+
+        return logger
 
     def _load_config(self) -> Dict[str, Any]:
         """設定ファイルの読み込み"""
         if self.config_path.exists():
             try:
                 with open(self.config_path, 'r', encoding='utf-8') as f:
-                    return yaml.safe_load(f)
+                    config = yaml.safe_load(f)
+                    # 環境変数での設定オーバーライド
+                    self._apply_env_overrides(config)
+                    return config
             except Exception as e:
-                logger.error(f"設定ファイルの読み込みに失敗: {e}")
+                print(f"設定ファイルの読み込みに失敗: {e}")
                 return self._get_default_config()
         else:
-            logger.warning(f"設定ファイルが見つかりません: {self.config_path}")
+            print(f"設定ファイルが見つかりません: {self.config_path}")
             return self._get_default_config()
 
-    def _get_default_config(self) -> Dict[str, Any]:
+    def _apply_env_overrides(self, config: Dict[str, Any]) -> None:
+        """環境変数による設定オーバーライド"""
+        # OpenAI API Key
+        if os.getenv("OPENAI_API_KEY"):
+            config.setdefault("api", {})["openai_api_key"] = os.getenv("OPENAI_API_KEY")
+
+        # ログレベル
+        if os.getenv("LOG_LEVEL"):
+            config.setdefault("logging", {})["level"] = os.getenv("LOG_LEVEL")
+
+        # デバッグモード
+        if os.getenv("DEBUG_MODE"):
+            config.setdefault("experimental", {})["debug_mode"] = os.getenv("DEBUG_MODE").lower() == "true"
+
+    @staticmethod
+    def _get_default_config() -> Dict[str, Any]:
         """デフォルト設定"""
         return {
-            "models": {
+            "models"        : {
                 "default"  : "gpt-4o-mini",
                 "available": ["gpt-4o-mini", "gpt-4o", "gpt-4.1", "gpt-4.1-mini"]
             },
-            "api"   : {
-                "timeout"    : 30,
-                "max_retries": 3
+            "api"           : {
+                "timeout"       : 30,
+                "max_retries"   : 3,
+                "openai_api_key": None
             },
-            "ui"    : {
+            "ui"            : {
                 "page_title": "OpenAI API Demo",
+                "page_icon" : "🤖",
                 "layout"    : "wide"
             },
-            "cache" : {
+            "cache"         : {
                 "enabled" : True,
                 "ttl"     : 3600,
                 "max_size": 100
+            },
+            "logging"       : {
+                "level"       : "INFO",
+                "format"      : "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+                "file"        : None,
+                "max_bytes"   : 10485760,
+                "backup_count": 5
+            },
+            "error_messages": {
+                "general_error"  : "エラーが発生しました",
+                "api_key_missing": "APIキーが設定されていません",
+                "network_error"  : "ネットワークエラーが発生しました"
+            },
+            "experimental"  : {
+                "debug_mode"            : False,
+                "performance_monitoring": True
             }
         }
 
@@ -129,25 +187,90 @@ class ConfigManager:
         self._cache[key] = result
         return result
 
+    def set(self, key: str, value: Any) -> None:
+        """設定値の更新"""
+        keys = key.split('.')
+        config = self._config
+        for k in keys[:-1]:
+            config = config.setdefault(k, {})
+        config[keys[-1]] = value
+
+        # キャッシュクリア
+        self._cache.pop(key, None)
+
     def reload(self):
         """設定の再読み込み"""
         self._config = self._load_config()
         self._cache.clear()
 
+    def save(self, filepath: str = None) -> bool:
+        """設定をファイルに保存"""
+        try:
+            save_path = Path(filepath) if filepath else self.config_path
+            with open(save_path, 'w', encoding='utf-8') as f:
+                yaml.safe_dump(self._config, f, default_flow_style=False, allow_unicode=True)
+            return True
+        except Exception as e:
+            if hasattr(self, 'logger'):
+                self.logger.error(f"設定保存エラー: {e}")
+            return False
+
 
 # グローバル設定インスタンス
 config = ConfigManager()
+logger = config.logger
+
 
 # ==================================================
 # メモリベースキャッシュ
 # ==================================================
-_cache_storage = {}
+class MemoryCache:
+    """メモリベースキャッシュ"""
+
+    def __init__(self):
+        self._storage = {}
+        self._enabled = config.get("cache.enabled", True)
+        self._ttl = config.get("cache.ttl", 3600)
+        self._max_size = config.get("cache.max_size", 100)
+
+    def get(self, key: str) -> Any:
+        """キャッシュから値を取得"""
+        if not self._enabled or key not in self._storage:
+            return None
+
+        cached_data = self._storage[key]
+        if time.time() - cached_data['timestamp'] > self._ttl:
+            del self._storage[key]
+            return None
+
+        return cached_data['result']
+
+    def set(self, key: str, value: Any) -> None:
+        """キャッシュに値を設定"""
+        if not self._enabled:
+            return
+
+        self._storage[key] = {
+            'result'   : value,
+            'timestamp': time.time()
+        }
+
+        # サイズ制限チェック
+        if len(self._storage) > self._max_size:
+            oldest_key = min(self._storage, key=lambda k: self._storage[k]['timestamp'])
+            del self._storage[oldest_key]
+
+    def clear(self) -> None:
+        """キャッシュクリア"""
+        self._storage.clear()
+
+    def size(self) -> int:
+        """キャッシュサイズ"""
+        return len(self._storage)
 
 
-def clear_cache():
-    """キャッシュクリア"""
-    global _cache_storage
-    _cache_storage.clear()
+# グローバルキャッシュインスタンス
+cache = MemoryCache()
 
 
 # ==================================================
@@ -195,26 +318,14 @@ def cache_result(ttl: int = None):
             # キャッシュキーの生成
             cache_key = f"{func.__name__}_{hashlib.md5(str(args).encode() + str(kwargs).encode()).hexdigest()}"
 
-            # キャッシュの確認
-            if cache_key in _cache_storage:
-                cached_data = _cache_storage[cache_key]
-                if time.time() - cached_data['timestamp'] < (ttl or config.get("cache.ttl", 3600)):
-                    return cached_data['result']
+            # キャッシュから取得
+            cached_result = cache.get(cache_key)
+            if cached_result is not None:
+                return cached_result
 
             # 関数実行とキャッシュ保存
             result = func(*args, **kwargs)
-            _cache_storage[cache_key] = {
-                'result'   : result,
-                'timestamp': time.time()
-            }
-
-            # キャッシュサイズ制限
-            max_size = config.get("cache.max_size", 100)
-            if len(_cache_storage) > max_size:
-                # 最も古いエントリを削除
-                oldest_key = min(_cache_storage, key=lambda k: _cache_storage[k]['timestamp'])
-                del _cache_storage[oldest_key]
-
+            cache.set(cache_key, result)
             return result
 
         return wrapper
@@ -234,20 +345,25 @@ class MessageManager:
     @staticmethod
     def get_default_messages() -> List[EasyInputMessageParam]:
         """デフォルトメッセージの取得"""
-        messages = config.get("default_messages", {})
+        default_messages = config.get("default_messages", {})
+
+        developer_content = default_messages.get(
+            "developer",
+            "You are a helpful assistant specialized in software development."
+        )
+        user_content = default_messages.get(
+            "user",
+            "Please help me with my software development tasks."
+        )
+        assistant_content = default_messages.get(
+            "assistant",
+            "I'll help you with your software development needs. Please let me know what you'd like to work on."
+        )
+
         return [
-            EasyInputMessageParam(
-                role="developer",
-                content=messages.get("developer", developer_text)
-            ),
-            EasyInputMessageParam(
-                role="user",
-                content=messages.get("user", user_text)
-            ),
-            EasyInputMessageParam(
-                role="assistant",
-                content=messages.get("assistant", assistant_text)
-            ),
+            EasyInputMessageParam(role="developer", content=developer_content),
+            EasyInputMessageParam(role="user", content=user_content),
+            EasyInputMessageParam(role="assistant", content=assistant_content),
         ]
 
     def add_message(self, role: RoleType, content: str):
@@ -256,9 +372,7 @@ class MessageManager:
         if role not in valid_roles:
             raise ValueError(f"Invalid role: {role}. Must be one of {valid_roles}")
 
-        self._messages.append(
-            EasyInputMessageParam(role=role, content=content)
-        )
+        self._messages.append(EasyInputMessageParam(role=role, content=content))
 
         # メッセージ数制限
         limit = config.get("api.message_limit", 50)
@@ -319,7 +433,6 @@ class TokenManager:
             model = config.get("models.default", "gpt-4o-mini")
 
         try:
-            # モデル別のエンコーディングを取得
             encoding_name = cls.MODEL_ENCODINGS.get(model, "cl100k_base")
             enc = tiktoken.get_encoding(encoding_name)
             return len(enc.encode(text))
@@ -343,7 +456,6 @@ class TokenManager:
             return enc.decode(tokens[:max_tokens])
         except Exception as e:
             logger.error(f"テキスト切り詰めエラー: {e}")
-            # 簡易的な切り詰め
             estimated_chars = max_tokens * 2
             return text[:estimated_chars]
 
@@ -353,12 +465,10 @@ class TokenManager:
         if model is None:
             model = config.get("models.default", "gpt-4o-mini")
 
-        # 設定ファイルから料金を取得
         pricing = config.get("model_pricing", {})
         model_pricing = pricing.get(model, pricing.get("gpt-4o-mini"))
 
         if not model_pricing:
-            # デフォルト料金
             model_pricing = {"input": 0.00015, "output": 0.0006}
 
         input_cost = (input_tokens / 1000) * model_pricing["input"]
@@ -448,6 +558,12 @@ class OpenAIClient:
     """OpenAI API クライアント"""
 
     def __init__(self, api_key: str = None):
+        if api_key is None:
+            api_key = config.get("api.openai_api_key") or os.getenv("OPENAI_API_KEY")
+
+        if not api_key:
+            raise ValueError(config.get("error_messages.api_key_missing", "APIキーが設定されていません"))
+
         self.client = OpenAI(api_key=api_key)
 
     @error_handler
@@ -502,9 +618,7 @@ def load_json_file(filepath: str) -> Optional[Dict[str, Any]]:
 def save_json_file(data: Dict[str, Any], filepath: str) -> bool:
     """JSONファイルの保存"""
     try:
-        # ディレクトリの作成
         Path(filepath).parent.mkdir(parents=True, exist_ok=True)
-
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         return True
@@ -530,6 +644,21 @@ def create_session_id() -> str:
 
 
 # ==================================================
+# 定数定義
+# ==================================================
+developer_text = (
+    "You are a strong developer and good at teaching software developer professionals "
+    "please provide an up-to-date, informed overview of the API by function, then show "
+    "cookbook programs for each, and explain the API options."
+)
+user_text = (
+    "Organize and identify the problem and list the issues. "
+    "Then, provide a solution procedure for the issues you have organized and identified, "
+    "and solve the problems/issues according to the solution procedures."
+)
+assistant_text = "I'll help you with your software development needs. Please let me know what you'd like to work on."
+
+# ==================================================
 # エクスポート
 # ==================================================
 __all__ = [
@@ -542,6 +671,7 @@ __all__ = [
     'TokenManager',
     'ResponseProcessor',
     'OpenAIClient',
+    'MemoryCache',
 
     # デコレータ
     'error_handler',
@@ -554,7 +684,6 @@ __all__ = [
     'save_json_file',
     'format_timestamp',
     'create_session_id',
-    'clear_cache',
 
     # 定数
     'developer_text',
@@ -563,4 +692,6 @@ __all__ = [
 
     # グローバル
     'config',
+    'logger',
+    'cache',
 ]
