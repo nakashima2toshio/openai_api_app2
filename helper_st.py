@@ -7,7 +7,7 @@ from datetime import datetime
 from abc import ABC, abstractmethod
 import json
 import time
-import traceback  # ← 追加
+import traceback
 
 import streamlit as st
 
@@ -31,12 +31,34 @@ from helper_api import (
     sanitize_key,
     format_timestamp,
     save_json_file,
+    safe_json_serializer,
+    safe_json_dumps,
 
     # グローバル
     config,
     logger,
     cache,
 )
+
+
+# ==================================================
+# 安全なStreamlit JSON表示関数
+# ==================================================
+def safe_streamlit_json(data: Any, expanded: bool = True):
+    """Streamlit用の安全なJSON表示"""
+    try:
+        # 直接st.json()を試行
+        st.json(data, expanded=expanded)
+    except Exception as e:
+        try:
+            # カスタムシリアライザーでリトライ
+            json_str = safe_json_dumps(data)
+            parsed_data = json.loads(json_str)
+            st.json(parsed_data, expanded=expanded)
+        except Exception as e2:
+            # 最終フォールバック: コードブロックで表示
+            st.error(f"JSON表示エラー: {e}")
+            st.code(str(data), language="python")
 
 
 # ==================================================
@@ -222,7 +244,7 @@ class MessageManagerUI(MessageManager):
     def export_messages_ui(self) -> str:
         """メッセージ履歴のエクスポート（UI用）"""
         data = self.export_messages()
-        return json.dumps(data, ensure_ascii=False, indent=2)
+        return safe_json_dumps(data)
 
 
 # ==================================================
@@ -270,10 +292,17 @@ class UIHelper:
         """デバッグ情報の表示"""
         with st.sidebar.expander("🐛 デバッグ情報", expanded=False):
             st.write("**設定情報**")
-            st.json(config._config)
+            try:
+                safe_streamlit_json(config._config, expanded=False)
+            except Exception as e:
+                st.error(f"設定表示エラー: {e}")
 
             st.write("**セッション状態**")
-            st.json({k: str(v)[:100] for k, v in st.session_state.items()})
+            try:
+                session_info = {k: str(v)[:100] for k, v in st.session_state.items()}
+                safe_streamlit_json(session_info, expanded=False)
+            except Exception as e:
+                st.error(f"セッション状態表示エラー: {e}")
 
             st.write("**パフォーマンス**")
             metrics = SessionStateManager.get_performance_metrics()
@@ -465,19 +494,24 @@ class UIHelper:
             label: str = "ダウンロード",
             help: str = None
     ):
-        """ダウンロードボタンの作成"""
-        if isinstance(data, (dict, list)):
-            data = json.dumps(data, ensure_ascii=False, indent=2)
-            if mime_type == "text/plain":
-                mime_type = "application/json"
+        """ダウンロードボタンの作成（安全なJSON処理対応）"""
+        try:
+            if isinstance(data, (dict, list)):
+                # 安全なJSONシリアライゼーションを使用
+                data = safe_json_dumps(data)
+                if mime_type == "text/plain":
+                    mime_type = "application/json"
 
-        st.download_button(
-            label=label,
-            data=data,
-            file_name=filename,
-            mime=mime_type,
-            help=help or f"{filename}をダウンロードします"
-        )
+            st.download_button(
+                label=label,
+                data=data,
+                file_name=filename,
+                mime=mime_type,
+                help=help or f"{filename}をダウンロードします"
+            )
+        except Exception as e:
+            st.error(f"ダウンロードボタン作成エラー: {e}")
+            logger.error(f"Download button error: {e}")
 
     @staticmethod
     def show_settings_panel():
@@ -544,9 +578,14 @@ class UIHelper:
 
             # 実行時間の推移
             if len(metrics) > 1:
-                import pandas as pd
-                df = pd.DataFrame(metrics)
-                st.line_chart(df.set_index('timestamp')['execution_time'])
+                try:
+                    import pandas as pd
+                    df = pd.DataFrame(metrics)
+                    st.line_chart(df.set_index('timestamp')['execution_time'])
+                except ImportError:
+                    st.info("pandas が必要です：pip install pandas")
+                except Exception as e:
+                    st.error(f"チャート表示エラー: {e}")
 
 
 # ==================================================
@@ -557,7 +596,7 @@ class ResponseProcessorUI(ResponseProcessor):
 
     @staticmethod
     def display_response(response: Response, show_details: bool = True, show_raw: bool = False):
-        """レスポンスの表示（改良版）"""
+        """レスポンスの表示（改良版・エラーハンドリング強化）"""
         texts = ResponseProcessor.extract_text(response)
 
         if texts:
@@ -573,77 +612,76 @@ class ResponseProcessorUI(ResponseProcessor):
                     st.markdown(text)
                 with col2:
                     if st.button("📋", key=f"copy_{i}", help="回答をコピー"):
-                        st.write("📋 コピーしました")  # 実際のコピー機能はブラウザ制限により困難
+                        st.write("📋 コピーしました")
         else:
             st.warning("⚠️ テキストが見つかりませんでした")
 
         # 詳細情報の表示
         if show_details:
             with st.expander("📊 詳細情報", expanded=False):
-                formatted = ResponseProcessor.format_response(response)
+                try:
+                    formatted = ResponseProcessor.format_response(response)
 
-                # 使用状況の表示（安全なアクセス）
-                usage_data = formatted.get('usage', {})
-                if usage_data and isinstance(usage_data, dict):
-                    st.write("**トークン使用量**")
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        prompt_tokens = usage_data.get('prompt_tokens', 0)
-                        st.metric("入力", prompt_tokens)
-                    with col2:
-                        completion_tokens = usage_data.get('completion_tokens', 0)
-                        st.metric("出力", completion_tokens)
-                    with col3:
-                        total_tokens = usage_data.get('total_tokens', 0)
-                        st.metric("合計", total_tokens)
+                    # 使用状況の表示（安全なアクセス）
+                    usage_data = formatted.get('usage', {})
+                    if usage_data and isinstance(usage_data, dict):
+                        st.write("**トークン使用量**")
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            prompt_tokens = usage_data.get('prompt_tokens', 0)
+                            st.metric("入力", prompt_tokens)
+                        with col2:
+                            completion_tokens = usage_data.get('completion_tokens', 0)
+                            st.metric("出力", completion_tokens)
+                        with col3:
+                            total_tokens = usage_data.get('total_tokens', 0)
+                            st.metric("合計", total_tokens)
 
-                    # コスト計算
-                    model = formatted.get('model')
-                    if model and (prompt_tokens > 0 or completion_tokens > 0):
-                        cost = TokenManager.estimate_cost(
-                            prompt_tokens,
-                            completion_tokens,
-                            model
+                        # コスト計算
+                        model = formatted.get('model')
+                        if model and (prompt_tokens > 0 or completion_tokens > 0):
+                            try:
+                                cost = TokenManager.estimate_cost(
+                                    prompt_tokens,
+                                    completion_tokens,
+                                    model
+                                )
+                                st.metric("推定コスト", f"${cost:.6f}")
+                            except Exception as e:
+                                st.error(f"コスト計算エラー: {e}")
+
+                    # レスポンス情報
+                    st.write("**レスポンス情報**")
+                    info_data = {
+                        "ID"      : formatted.get('id', 'N/A'),
+                        "モデル"  : formatted.get('model', 'N/A'),
+                        "作成日時": formatted.get('created_at', 'N/A')
+                    }
+
+                    for key, value in info_data.items():
+                        st.write(f"- **{key}**: {value}")
+
+                    # Raw JSON表示（安全なJSON処理）
+                    if show_raw:
+                        st.write("**Raw JSON**")
+                        safe_streamlit_json(formatted)
+
+                    # ダウンロードボタン
+                    try:
+                        UIHelper.create_download_button(
+                            formatted,
+                            f"response_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                            "application/json",
+                            "📥 JSONダウンロード"
                         )
-                        st.metric("推定コスト", f"${cost:.6f}")
-                elif hasattr(response, 'usage') and response.usage:
-                    # usageオブジェクトから直接取得（フォールバック）
-                    st.write("**トークン使用量**")
-                    usage_obj = response.usage
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        prompt_tokens = getattr(usage_obj, 'prompt_tokens', 0)
-                        st.metric("入力", prompt_tokens)
-                    with col2:
-                        completion_tokens = getattr(usage_obj, 'completion_tokens', 0)
-                        st.metric("出力", completion_tokens)
-                    with col3:
-                        total_tokens = getattr(usage_obj, 'total_tokens', 0)
-                        st.metric("合計", total_tokens)
+                    except Exception as e:
+                        st.error(f"ダウンロードボタン作成エラー: {e}")
 
-                # レスポンス情報
-                st.write("**レスポンス情報**")
-                info_data = {
-                    "ID"      : formatted.get('id', 'N/A'),
-                    "モデル"  : formatted.get('model', 'N/A'),
-                    "作成日時": formatted.get('created_at', 'N/A')
-                }
-
-                for key, value in info_data.items():
-                    st.write(f"- **{key}**: {value}")
-
-                # Raw JSON表示
-                if show_raw:
-                    st.write("**Raw JSON**")
-                    st.json(formatted)
-
-                # ダウンロードボタン
-                UIHelper.create_download_button(
-                    formatted,
-                    f"response_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                    "application/json",
-                    "📥 JSONダウンロード"
-                )
+                except Exception as e:
+                    st.error(f"詳細情報表示エラー: {e}")
+                    logger.error(f"Response display error: {e}")
+                    if config.get("experimental.debug_mode", False):
+                        st.exception(e)
 
 
 # ==================================================
@@ -773,6 +811,9 @@ __all__ = [
     'error_handler_ui',
     'timer_ui',
     'cache_result_ui',
+
+    # ユーティリティ
+    'safe_streamlit_json',
 
     # 後方互換性
     'init_page',

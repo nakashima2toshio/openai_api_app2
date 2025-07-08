@@ -274,6 +274,61 @@ cache = MemoryCache()
 
 
 # ==================================================
+# 安全なJSON処理関数
+# ==================================================
+def safe_json_serializer(obj: Any) -> Any:
+    """
+    カスタムJSONシリアライザー
+    OpenAI APIのレスポンスオブジェクトなど、標準では処理できないオブジェクトを変換
+    """
+    # Pydantic モデルの場合
+    if hasattr(obj, 'model_dump'):
+        try:
+            return obj.model_dump()
+        except Exception:
+            pass
+
+    # dict() メソッドがある場合
+    if hasattr(obj, 'dict'):
+        try:
+            return obj.dict()
+        except Exception:
+            pass
+
+    # datetime オブジェクトの場合
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+
+    # OpenAI ResponseUsage オブジェクトの場合（手動属性抽出）
+    if hasattr(obj, 'prompt_tokens') and hasattr(obj, 'completion_tokens'):
+        return {
+            'prompt_tokens'    : getattr(obj, 'prompt_tokens', 0),
+            'completion_tokens': getattr(obj, 'completion_tokens', 0),
+            'total_tokens'     : getattr(obj, 'total_tokens', 0)
+        }
+
+    # その他のオブジェクトは文字列化
+    return str(obj)
+
+
+def safe_json_dumps(data: Any, **kwargs) -> str:
+    """安全なJSON文字列化"""
+    default_kwargs = {
+        'ensure_ascii': False,
+        'indent'      : 2,
+        'default'     : safe_json_serializer
+    }
+    default_kwargs.update(kwargs)
+
+    try:
+        return json.dumps(data, **default_kwargs)
+    except Exception as e:
+        logger.error(f"JSON serialization error: {e}")
+        # フォールバック: 文字列化
+        return json.dumps(str(data), **{k: v for k, v in default_kwargs.items() if k != 'default'})
+
+
+# ==================================================
 # デコレータ（API用）
 # ==================================================
 def error_handler(func):
@@ -521,14 +576,46 @@ class ResponseProcessor:
         return texts
 
     @staticmethod
+    def _serialize_usage(usage_obj) -> Dict[str, Any]:
+        """ResponseUsageオブジェクトを辞書に変換"""
+        if usage_obj is None:
+            return {}
+
+        # Pydantic モデルの場合
+        if hasattr(usage_obj, 'model_dump'):
+            try:
+                return usage_obj.model_dump()
+            except Exception:
+                pass
+
+        # dict() メソッドがある場合
+        if hasattr(usage_obj, 'dict'):
+            try:
+                return usage_obj.dict()
+            except Exception:
+                pass
+
+        # 手動で属性を抽出
+        usage_dict = {}
+        for attr in ['prompt_tokens', 'completion_tokens', 'total_tokens']:
+            if hasattr(usage_obj, attr):
+                usage_dict[attr] = getattr(usage_obj, attr)
+
+        return usage_dict
+
+    @staticmethod
     def format_response(response: Response) -> Dict[str, Any]:
-        """レスポンスを整形"""
+        """レスポンスを整形（JSON serializable）"""
+        # usage オブジェクトを安全に変換
+        usage_obj = getattr(response, "usage", None)
+        usage_dict = ResponseProcessor._serialize_usage(usage_obj)
+
         return {
             "id"        : getattr(response, "id", None),
             "model"     : getattr(response, "model", None),
             "created_at": getattr(response, "created_at", None),
             "text"      : ResponseProcessor.extract_text(response),
-            "usage"     : getattr(response, "usage", {}),
+            "usage"     : usage_dict,
         }
 
     @staticmethod
@@ -619,8 +706,11 @@ def save_json_file(data: Dict[str, Any], filepath: str) -> bool:
     """JSONファイルの保存"""
     try:
         Path(filepath).parent.mkdir(parents=True, exist_ok=True)
+
+        # 安全なJSON保存を使用
+        json_str = safe_json_dumps(data)
         with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.write(json_str)
         return True
     except Exception as e:
         logger.error(f"JSONファイル保存エラー: {e}")
@@ -684,6 +774,8 @@ __all__ = [
     'save_json_file',
     'format_timestamp',
     'create_session_id',
+    'safe_json_serializer',
+    'safe_json_dumps',
 
     # 定数
     'developer_text',
