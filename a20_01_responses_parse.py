@@ -4,7 +4,7 @@
 # OpenAI API: https://platform.openai.com/docs/api-reference/introduction
 # Streamlit API: https://docs.streamlit.io/develop/api-reference
 # ----------------------------------------
-# [Menu] OpenAI APIの概要
+# [Menu] OpenAI APIの概要　（改修前）
 # 01_01  Responsesサンプル
 # 01_011 Responsesサンプル
 # 01_02  画像入力(URL)
