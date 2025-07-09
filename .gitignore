@@ -324,3 +324,4 @@ cython_debug/
 /datasets/
 /datasets/*.csv
 /images/*
+/data/

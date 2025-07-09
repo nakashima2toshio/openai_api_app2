@@ -52,7 +52,7 @@ class InfoPanelManager:
     @staticmethod
     def show_model_info(selected_model: str):
         """モデル情報パネル"""
-        with st.sidebar.expander("🤖 モデル情報", expanded=True):
+        with st.sidebar.expander("モデル情報", expanded=True):
             # 基本情報
             limits = TokenManager.get_model_limits(selected_model)
             pricing = config.get("model_pricing", {}).get(selected_model, {})
@@ -79,16 +79,16 @@ class InfoPanelManager:
 
             # モデル特性
             if "reasoning" in model_category:
-                st.success("🧠 推論特化モデル - 複雑な問題解決に最適")
+                st.success("推論特化モデル - 複雑な問題解決に最適")
             elif "audio" in selected_model:
-                st.success("🎵 音声対応モデル - 音声入出力が可能")
+                st.success("音声対応モデル - 音声入出力が可能")
             elif "vision" in selected_model or "gpt-4o" in selected_model:
-                st.success("👁️ 視覚対応モデル - 画像理解が可能")
+                st.success("視覚対応モデル - 画像理解が可能")
 
     @staticmethod
     def show_session_info():
         """セッション情報パネル"""
-        with st.sidebar.expander("📊 セッション情報", expanded=False):
+        with st.sidebar.expander("セッション情報", expanded=False):
             # セッション統計
             session_data = {}
             for key, value in st.session_state.items():
@@ -138,7 +138,7 @@ class InfoPanelManager:
     @staticmethod
     def show_cost_calculator(selected_model: str):
         """料金計算パネル"""
-        with st.sidebar.expander("💰 料金計算", expanded=False):
+        with st.sidebar.expander("料金計算", expanded=False):
             pricing = config.get("model_pricing", {}).get(selected_model)
             if not pricing:
                 st.warning("料金情報が見つかりません")
@@ -161,7 +161,7 @@ class InfoPanelManager:
             )
 
             # 料金計算
-            if st.button("💰 料金計算", use_container_width=True):
+            if st.button("料金計算", use_container_width=True):
                 cost = TokenManager.estimate_cost(input_tokens, output_tokens, selected_model)
 
                 # 詳細表示
@@ -183,7 +183,7 @@ class InfoPanelManager:
         if not config.get("experimental.debug_mode", False):
             return
 
-        with st.sidebar.expander("🐛 デバッグ情報", expanded=False):
+        with st.sidebar.expander("デバッグ情報", expanded=False):
             # 設定情報
             st.write("**アクティブ設定**")
             debug_config = {
@@ -228,7 +228,7 @@ class ResponsesSkeletonDemo:
 
     def setup_sidebar(self, selected_model: str):
         """左サイドバーの設定"""
-        st.sidebar.write("📋 情報パネル")
+        st.sidebar.write("情報パネル")
 
         # 各情報パネルを表示
         InfoPanelManager.show_model_info(selected_model)
@@ -244,7 +244,7 @@ class ResponsesSkeletonDemo:
     @timer_ui
     def responses_create_demo(self, selected_model: str):
         """responses.create デモ"""
-        st.subheader("🎯 responses.create デモ")
+        st.subheader("responses.create デモ")
 
         # 説明
         st.info("""
@@ -256,7 +256,7 @@ class ResponsesSkeletonDemo:
         user_input, submitted = UIHelper.create_input_form(
             key="create_form",
             label="質問を入力してください",
-            submit_label="🚀 送信",
+            submit_label="送信",
             placeholder="例: OpenAIのResponses APIについて教えて",
             help="何でも気軽に質問してください"
         )
@@ -272,25 +272,25 @@ class ResponsesSkeletonDemo:
                 limits = TokenManager.get_model_limits(selected_model)
 
                 if token_count > limits['max_tokens'] * 0.8:
-                    st.warning(f"⚠️ 入力が長すぎます ({token_count:,} トークン)")
+                    st.warning(f"入力が長すぎます ({token_count:,} トークン)")
                     return
 
                 # メッセージ準備
-                status_text.text("📝 メッセージを準備中...")
+                status_text.text("メッセージを準備中...")
                 progress_bar.progress(20)
 
                 messages = self.message_manager.get_default_messages()
                 messages.append(EasyInputMessageParam(role="user", content=user_input))
 
                 # API呼び出し
-                status_text.text("🤖 AIが回答を生成中...")
+                status_text.text("AIが回答を生成中...")
                 progress_bar.progress(50)
 
                 client = OpenAIClient()
                 response = client.create_response(messages, model=selected_model)
 
                 # 結果表示
-                status_text.text("✅ 完了!")
+                status_text.text("完了!")
                 progress_bar.progress(100)
 
                 # 回答表示
@@ -313,7 +313,7 @@ class ResponsesSkeletonDemo:
     @timer_ui
     def responses_parse_demo(self, selected_model: str):
         """responses.parse デモ"""
-        st.subheader("🎯 responses.parse デモ")
+        st.subheader("responses.parse デモ")
 
         # 説明
         st.info("""
@@ -329,13 +329,13 @@ class ResponsesSkeletonDemo:
         user_input, submitted = UIHelper.create_input_form(
             key="parse_form",
             label="人物情報を入力してください",
-            submit_label="🔄 構造化",
+            submit_label="構造化",
             value=sample_text,
             help="名前、年齢、住所が含まれるテキストを入力"
         )
 
         # スキーマ表示
-        with st.expander("📋 出力スキーマ", expanded=False):
+        with st.expander("出力スキーマ", expanded=False):
             st.code("""
 class UserInfo(BaseModel):
     name: str = Field(..., description="ユーザー名")
@@ -354,7 +354,7 @@ class People(BaseModel):
 
             try:
                 # メッセージ準備
-                status_text.text("📝 構造化プロンプトを準備中...")
+                status_text.text("構造化プロンプトを準備中...")
                 progress_bar.progress(25)
 
                 messages = [
@@ -369,7 +369,7 @@ class People(BaseModel):
                 ]
 
                 # API呼び出し
-                status_text.text("🔄 構造化データを生成中...")
+                status_text.text("構造化データを生成中...")
                 progress_bar.progress(70)
 
                 client = OpenAIClient()
@@ -380,14 +380,14 @@ class People(BaseModel):
                 )
 
                 # 結果処理
-                status_text.text("✅ 構造化完了!")
+                status_text.text("構造化完了!")
                 progress_bar.progress(100)
 
                 # 結果表示
                 if hasattr(response, 'output_parsed'):
                     people: People = response.output_parsed
 
-                    st.success(f"🎉 {people.total_count}人の情報を抽出しました!")
+                    st.success(f"{people.total_count}人の情報を抽出しました!")
 
                     # 構造化データ表示
                     col1, col2 = st.columns([2, 1])
@@ -407,7 +407,7 @@ class People(BaseModel):
                                 st.divider()
 
                     with col2:
-                        st.subheader("📊 JSON出力")
+                        st.subheader("JSON出力")
                         st.json(people.model_dump())
 
                         # ダウンロードボタン
@@ -415,11 +415,11 @@ class People(BaseModel):
                             people.model_dump(),
                             "extracted_people.json",
                             "application/json",
-                            "📥 JSONダウンロード"
+                            "JSONダウンロード"
                         )
 
                 # 詳細情報
-                with st.expander("📊 API詳細情報", expanded=False):
+                with st.expander("API詳細情報", expanded=False):
                     # レスポンス情報の安全な取得
                     response_info = {
                         "model": selected_model,
@@ -453,7 +453,7 @@ class People(BaseModel):
 
     def show_message_history(self):
         """メッセージ履歴表示"""
-        with st.expander("💬 会話履歴", expanded=False):
+        with st.expander("会話履歴", expanded=False):
             messages = self.message_manager.get_messages()
             if messages:
                 UIHelper.display_messages(messages, show_system=True)
@@ -465,13 +465,13 @@ class People(BaseModel):
                         self.message_manager.clear_messages()
                         st.rerun()
                 with col2:
-                    if st.button("📥 履歴エクスポート"):
+                    if st.button("履歴エクスポート"):
                         export_data = self.message_manager.export_messages_ui()
                         UIHelper.create_download_button(
                             export_data,
                             "chat_history.json",
                             "application/json",
-                            "💾 保存"
+                            "保存"
                         )
                 with col3:
                     st.write("メッセージ数", len(messages))
@@ -481,7 +481,7 @@ class People(BaseModel):
     def run(self):
         """メインデモ実行"""
         # ページ初期化
-        init_page("🚀 Responses API 基本デモ", sidebar_title="📋 情報パネル")
+        init_page("Responses API 基本デモ", sidebar_title="📋 情報パネル")
 
         # モデル選択
         selected_model = select_model(self.demo_name)
@@ -491,14 +491,14 @@ class People(BaseModel):
 
         # メイン画面
         st.markdown("""
-        ## 📖 概要
+        ## 概要
         このデモでは OpenAI Responses API の基本機能を体験できます：
         - **responses.create**: 自然言語での対話
         - **responses.parse**: 構造化データの生成
         """)
 
         # タブでデモを分離
-        tab1, tab2, tab3 = st.tabs(["💬 Create Demo", "🔄 Parse Demo", "📝 履歴"])
+        tab1, tab2, tab3 = st.tabs(["Create Demo", "Parse Demo", "履歴"])
 
         with tab1:
             self.responses_create_demo(selected_model)
@@ -513,8 +513,8 @@ class People(BaseModel):
         st.markdown("---")
         st.markdown("""
         <div style='text-align: center; color: gray;'>
-        🔧 <b>改修版</b> - 新しいヘルパーモジュールを使用 | 
-        📊 左ペインで詳細情報を確認できます
+        改修版 - 新しいヘルパーモジュールを使用 | 
+        左ペインで詳細情報を確認できます
         </div>
         """, unsafe_allow_html=True)
 

@@ -18,723 +18,1033 @@
 # 01_062 Web Search
 # 01_07  Computer Use Tool Param
 # ----------------------------------------
+# streamlit run a20_01_responses_parse.py --server.port=8501
+# 改修版: 新しいヘルパーモジュールを使用したResponses API包括サンプル
+# ==================================================
+# OpenAI Responses APIの様々な機能をデモンストレーション
+# - 基本的なAPI呼び出し
+# - 画像入力（URL/Base64）
+# - 構造化出力
+# - 関数呼び出し
+# - ツール（FileSearch/WebSearch）
+# - Computer Use
+# ==================================================
+
 import os
 import sys
-
-sys.path.insert(
-    0, os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-)
-
 import json
 import base64
 import glob
 import requests
+from typing import List, Dict, Any, Optional
 from pathlib import Path
-import pandas as pd
+from pydantic import BaseModel, Field
 
+import streamlit as st
 from openai import OpenAI
 from openai.types.responses.web_search_tool_param import UserLocation
 
 from openai.types.responses import (
-    EasyInputMessageParam,      # 基本の入力メッセージ
-    ResponseInputTextParam,     # 入力テキスト
-    ResponseInputImageParam,    # 入力画像
-    ResponseFormatTextJSONSchemaConfigParam,  # Structured output 用
-    ResponseTextConfigParam,    # Structured output 用
-    FunctionToolParam,          # 関数呼び出しツール
-    FileSearchToolParam,        # ファイル検索ツール
-    WebSearchToolParam,         # Web 検索ツール
-    ComputerToolParam,          #
+    EasyInputMessageParam,
+    ResponseInputTextParam,
+    ResponseInputImageParam,
+    ResponseFormatTextJSONSchemaConfigParam,
+    ResponseTextConfigParam,
+    FunctionToolParam,
+    FileSearchToolParam,
+    WebSearchToolParam,
+    ComputerToolParam,
     Response
 )
 
-from pydantic import BaseModel, ValidationError
-
-BASE_DIR = Path(__file__).resolve().parent.parent
-THIS_DIR = Path(__file__).resolve().parent
-DATASETS_DIR = os.path.join(BASE_DIR, 'datasets')
-
-from helper import (
-    init_page,
-    init_messages,
-    select_model,
-    sanitize_key,
-    get_default_messages,
-    extract_text_from_response, append_user_message,
-)
-
-import streamlit as st
-
-# --- インポート直後に１度だけ実行する ---
-st.set_page_config(
-    page_title="ChatGPT Responses API",
-    page_icon="2025-5 Nakashima"
-)
-
-# サンプル画像 URL
-image_path_sample = (
-    "https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/"
-    "Gfp-wisconsin-madison-the-nature-boardwalk.jpg/2560px-"
-    "Gfp-wisconsin-madison-the-nature-boardwalk.jpg"
-)
-
-# ==================================================
-# 01_00 テキスト入出力 (One Shot):responses.create
-# ==================================================
-def responses_parse_basic(demo_name: str = "01_00_responses_parse_basic"):
-    class UserInfo(BaseModel):
-        name: str
-        age: int
-        city: str
-
-    # ルートを object にし、その中に配列フィールドを置く
-    class People(BaseModel):
-        users: list[UserInfo]
-
-    model = select_model(demo_name)
-    st.write("選択したモデル:", model)
-    client = OpenAI()
-
-    safe = sanitize_key(demo_name)
-    st.write(
-        "(記入例："
-        "私の名前は田中太郎、30歳、東京在住です。"
-        "私の名前は鈴木健太、28歳、大阪在住です。"
+# 改修されたヘルパーモジュールをインポート
+try:
+    from helper_st import (
+        UIHelper, MessageManagerUI, ResponseProcessorUI,
+        SessionStateManager, error_handler_ui, timer_ui,
+        init_page, select_model
     )
-    with st.form(key=f"responses_form_{safe}"):
-        user_input = st.text_area("ここにテキストを入力してください:", height=100)
-        submitted = st.form_submit_button("送信")
-
-    if submitted and user_input.strip():
-        # プロンプト側で「users 配列で返して」と明示
-        messages = get_default_messages()
-        append_developer_text = "あなたは情報抽出アシスタントです。"
-        messages.append(
-            EasyInputMessageParam(
-                role="developer",
-                content=[
-                    ResponseInputTextParam(type="input_text", text=append_developer_text),
-                ]
-            )
-        )
-        append_user_text = (
-            "私の名前は田中太郎、30歳、東京在住です。"
-            "私の名前は鈴木健太、28歳、大阪在住です。"
-        )
-        messages.append(
-            EasyInputMessageParam(
-                role="user",
-                content=[
-                    ResponseInputTextParam(type="input_text", text=append_user_text),
-                ]
-            )
-        )
-
-        response = client.responses.parse(
-            model=model,
-            input=messages,
-            text_format=People
-        )
-
-        people: People = response.output_parsed
-        for p in people.users:
-            output = f"{p.name} / {p.age} / {p.city}"
-            st.write(output)
+    from helper_api import (
+        config, logger, TokenManager, OpenAIClient,
+        EasyInputMessageParam, ResponseInputTextParam
+    )
+except ImportError as e:
+    st.error(f"ヘルパーモジュールのインポートに失敗しました: {e}")
+    st.stop()
 
 
 # ==================================================
-# 01_01 テキスト入出力 (One Shot):responses.create
+# Pydantic モデル定義
 # ==================================================
-def responses_sample(demo_name: str = "01_01_responses_One_Shot"):
-    init_messages(demo_name)
-    st.write(f"# {demo_name}")
-    model = select_model(demo_name)
-    st.write("選択したモデル:", model)
+class UserInfo(BaseModel):
+    name: str = Field(..., description="ユーザー名")
+    age: int = Field(..., ge=0, le=150, description="年齢")
+    city: str = Field(..., description="居住都市")
 
-    safe = sanitize_key(demo_name)
-    with st.form(key=f"responses_form_{safe}"):
-        user_input = st.text_area("ここにテキストを入力してください:", height=75)
-        submitted = st.form_submit_button("送信")
 
-    messages = get_default_messages()
-    if submitted and user_input:
-        st.write("入力内容:", user_input)
-        messages.append(EasyInputMessageParam(role="user", content=user_input))
-        client = OpenAI()
-        res = client.responses.create(model=model, input=messages)
-        for i, txt in enumerate(extract_text_from_response(res), 1):
-            st.code(txt)
+class People(BaseModel):
+    users: List[UserInfo] = Field(..., description="ユーザー一覧")
+    total_count: int = Field(..., description="総人数")
 
-        with st.form(key=f"responses_next_{safe}"):
-            if st.form_submit_button("次の質問"):
-                st.rerun()
+
+class Event(BaseModel):
+    name: str = Field(..., description="イベント名")
+    date: str = Field(..., description="開催日")
+    participants: List[str] = Field(..., description="参加者一覧")
 
 
 # ==================================================
-# 01_011 テキスト入出力 + history: responses.create
+# 情報パネル管理
 # ==================================================
-def responses_memory_sample(demo_name: str = "01_011_responses_memory"):
-    init_messages(demo_name)
-    st.write(f"# {demo_name}")
-    model = select_model(demo_name)
-    st.write("選択したモデル:", model)
+class InfoPanelManager:
+    """左ペインの情報パネル管理"""
 
-    messages = get_default_messages()
-    if "responses_memory_history" not in st.session_state:
-        st.session_state.responses_memory_history = messages
+    @staticmethod
+    def show_api_info():
+        """API情報パネル"""
+        with st.sidebar.expander("🔧 API情報", expanded=True):
+            st.write("**利用可能な機能**")
+            api_features = [
+                "responses.create - 基本対話",
+                "responses.parse - 構造化出力",
+                "画像入力 (URL/Base64)",
+                "関数呼び出し",
+                "FileSearch ツール",
+                "WebSearch ツール",
+                "Computer Use ツール"
+            ]
+            for feature in api_features:
+                st.write(feature)
 
-    # 履歴表示
-    for msg in st.session_state.responses_memory_history:
-        role = msg["role"]
-        if role == "user":
-            st.markdown(f"**User:** {msg['content']}")
-        elif role == "assistant":
-            st.markdown(f"<span style='color:green'><b>Assistant:</b> {msg['content']}</span>", unsafe_allow_html=True)
-        elif role == "developer":
-            st.markdown(f"<span style='color:gray'><i>System:</i> {msg['content']}</span>", unsafe_allow_html=True)
+    @staticmethod
+    def show_model_capabilities(selected_model: str):
+        """モデル能力情報"""
+        with st.sidebar.expander("モデル能力", expanded=False):
+            limits = TokenManager.get_model_limits(selected_model)
 
-    safe = sanitize_key(demo_name)
-    with st.form(key=f"qam_form_{safe}"):
-        user_input = st.text_area("ここにテキストを入力してください:", height=75, key=f"memory_input_{safe}")
-        submitted = st.form_submit_button("送信")
+            # モデルカテゴリ判定
+            categories = config.get("models.categories", {})
+            model_category = "standard"
+            for category, models in categories.items():
+                if selected_model in models:
+                    model_category = category
+                    break
 
-    if submitted and user_input:
-        st.session_state.responses_memory_history.append(EasyInputMessageParam(role="user", content=user_input))
-        client = OpenAI()
-        res = client.responses.create(model=model, input=st.session_state.responses_memory_history)
-        for txt in extract_text_from_response(res):
-            st.session_state.responses_memory_history.append(EasyInputMessageParam(role="assistant", content=txt))
-        st.rerun()
+            # カテゴリ別特徴表示
+            if "reasoning" in model_category:
+                st.info("推論モデル - 複雑な問題解決に最適")
+                st.write("- 段階的思考")
+                st.write("- 論理的推論")
+                st.write("- 問題分解")
+            elif "audio" in selected_model:
+                st.info("🎵 音声モデル - 音声入出力対応")
+                st.write("- 音声認識")
+                st.write("- 音声合成")
+                st.write("- リアルタイム対話")
+            elif "vision" in selected_model or "gpt-4o" in selected_model:
+                st.info("マルチモーダルモデル - 画像理解対応")
+                st.write("- 画像解析")
+                st.write("- 文書読取")
+                st.write("- 図表理解")
+            else:
+                st.info("標準モデル - 汎用的な対話")
 
-    if st.button("会話履歴クリア", key=f"memory_clear_{safe}"):
-        st.session_state.responses_memory_history = messages
-        st.rerun()
+            # トークン制限
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("最大入力", f"{limits['max_tokens']:,}")
+            with col2:
+                st.metric("最大出力", f"{limits['max_output']:,}")
+
+    @staticmethod
+    def show_demo_guide():
+        """デモガイド"""
+        with st.sidebar.expander("📚 デモガイド", expanded=False):
+            st.write("**基本機能**")
+            st.write("- Parse Basic: 構造化データ抽出")
+            st.write("- Create: 基本対話")
+            st.write("- Memory: 履歴付き対話")
+
+            st.write("**画像機能**")
+            st.write("- Image URL: URL指定画像解析")
+            st.write("- Image Base64: ファイル画像解析")
+
+            st.write("**高度な機能**")
+            st.write("- Structured: JSON構造化出力")
+            st.write("- Function: 外部関数呼び出し")
+            st.write("- Tools: 検索・操作ツール")
 
 
 # ==================================================
-# 01_02 画像入力 (URL):responses.create , テキスト出力
-# ==================================================
-def responses_01_02_passing_url(demo_name: str = "01_02_Image_URL"):
-    init_messages(demo_name)
-    model = select_model(demo_name)
-    st.write("選択したモデル:", model)
-
-    safe = sanitize_key(demo_name)
-    image_url = st.text_input("画像URLを入力してください", value=image_path_sample, key=f"img_url_{safe}")
-    question_text = "このイメージを説明しなさい。"
-
-    with st.form(key=f"responses_img_form_{safe}"):
-        submitted = st.form_submit_button("画像で質問")
-
-    messages = get_default_messages()
-    if submitted:
-        client = OpenAI()
-        messages.append(
-            EasyInputMessageParam(
-                role="user",
-                content=[
-                    ResponseInputTextParam(type="input_text", text=question_text),
-                    ResponseInputImageParam(type="input_image", image_url=image_url, detail="auto"),
-                ],
-            )
-        )
-        res = client.responses.create(model=model, input=messages)
-        st.write(getattr(res, "output_text", str(res)))
-
-
-# ==================================================
-# 01_021 画像入力 (base64):responses.create
+# ユーティリティ関数
 # ==================================================
 def encode_image(path: str) -> str:
+    """画像ファイルをBase64エンコード"""
     with open(path, "rb") as f:
         return base64.b64encode(f.read()).decode()
 
 
-def responses_01_021_base64_image(demo_name: str = "01_021_Image_Base64"):
-    init_messages(demo_name)
-    st.write(f"# {demo_name}")
-    model = select_model(demo_name)
-    st.write("選択したモデル:", model)
-
-    image_dir = "images/"
-    safe = sanitize_key(demo_name)
-    files = sorted(
-        glob.glob(f"{image_dir}/*.png") + glob.glob(f"{image_dir}/*.jpg") +
-        glob.glob(f"{image_dir}/*.jpeg") + glob.glob(f"{image_dir}/*.webp") +
-        glob.glob(f"{image_dir}/*.gif")
-    )
-    if not files:
-        st.warning(f"画像ディレクトリ {image_dir} に画像ファイルがありません")
-        return
-
-    file_path = st.selectbox("画像ファイルを選択してください", files, key=f"img_select_{safe}")
-
-    with st.form(key=f"img_b64_form_{safe}"):
-        submitted = st.form_submit_button("選択画像で実行")
-
-    if submitted:
-        b64 = encode_image(file_path)
-        st.image(file_path, caption="選択画像", width=320)
-        messages = get_default_messages()
-        messages.append(
-            EasyInputMessageParam(
-                role="user",
-                content=[
-                    ResponseInputTextParam(type="input_text", text="what's in this image?"),
-                    ResponseInputImageParam(type="input_image", image_url=f"data:image/jpeg;base64,{b64}",
-                                            detail="auto"),
-                ],
-            ),
-        )
-        res = OpenAI().responses.create(model=model, input=messages)
-        st.subheader("出力テキスト:")
-        st.write(getattr(res, "output_text", str(res)))
-
-
-# ==================================================
-# 01_03 構造化出力 (JSON Schema):responses.create
-# ==================================================
-
-# ------------- Pydantic モデル -------------
-class Event(BaseModel):
-    name: str
-    date: str
-    participants: list[str]
-
-
-# ------------- 共通ユーティリティ ----------------
-def responses_01_03_structured_output(demo_name: str = "01_03_Structured_Output") -> None:
-    # Structured Outputs デモ (parse_raw 廃止対応)
-
-    init_messages(demo_name)
-    st.header("1. structured_output: イベント情報抽出デモ")
-    safe = sanitize_key(demo_name)
-
-    # モデル選択
-    model = st.selectbox(
-        "モデルを選択",
-        ["gpt-4.1", "o4-mini", "gpt-4o-2024-08-06", "gpt-4o-mini"],
-        key=f"struct_model_{safe}",
-    )
-
-    # 入力テキスト
-    text = st.text_input(
-        "イベント詳細を入力",
-        "(例)台湾フェス2025 ～あつまれ！究極の台湾グルメ～ in Kawasaki Spark",
-        key=f"struct_input_{safe}",
-    )
-    st.write("(例)台湾フェス2025 ～あつまれ！究極の台湾グルメ～ in Kawasaki Spark")
-
-    if st.button("実行：イベント抽出", key=f"struct_btn_{safe}"):
-        # 1. JSON Schema
-        schema = {
-            "type"                : "object",
-            "properties"          : {
-                "name"        : {"type": "string"},
-                "date"        : {"type": "string"},
-                "participants": {"type": "array", "items": {"type": "string"}},
-            },
-            "required"            : ["name", "date", "participants"],
-            "additionalProperties": False,
-        }
-
-        # 2. 入力メッセージ
-        messages: list[EasyInputMessageParam] = [
-            EasyInputMessageParam(role="developer", content="Extract event details from the text."),
-            EasyInputMessageParam(role="user", content=[ResponseInputTextParam(type="input_text", text=text)]),
-        ]
-
-        # 3. Structured Output 指定 (最新 SDK は text=ResponseTextConfigParam)
-        text_cfg = ResponseTextConfigParam(
-            format=ResponseFormatTextJSONSchemaConfigParam(
-                name="event_extraction",
-                type="json_schema",
-                schema=schema,
-                strict=True,
-            )
-        )
-
-        # 4. API 呼び出し
-        client = OpenAI()
-        res = client.responses.create(model=model, input=messages, text=text_cfg)
-
-        # 5. Pydantic でバリデート
-        try:
-            event: Event = Event.model_validate_json(res.output_text)
-            st.subheader("抽出結果 (Pydantic)")
-            st.json(event.model_dump())
-            st.code(repr(event), language="python")
-        except (ValidationError, json.JSONDecodeError) as err:
-            st.error("出力のパースに失敗しました。モデル出力を確認してください。")
-            st.exception(err)
-
-
-# ==================================================
-# 01_031 構造化出力 (JSON Schema):responses.parse
-# ==================================================
-# --- 1. Pydantic モデル ---
-class Event2(BaseModel):
-    name: str
-    date: str
-    participants: list[str]
-
-
-# --- 2. コア関数 ---
-def responses_01_031_structured_output(demo_name: str = "01_03_Structured_Output"):
-    init_messages(demo_name)
-    safe = sanitize_key(demo_name)
-    st.header("1. structured_output: イベント情報抽出デモ")
-
-    model = st.selectbox(
-        "モデルを選択",
-        ["o4-mini", "gpt-4o-2024-08-06", "gpt-4o-mini"],
-        key=f"struct_model_{safe}",
-    )
-    text = st.text_input(
-        "イベント詳細を入力",
-        "(例)台湾フェス2025 ～あつまれ！究極の台湾グルメ～ in Kawasaki Spark",
-        key=f"struct_input_{safe}",
-    )
-
-    if st.button("実行：イベント抽出", key=f"struct_btn_{safe}"):
-        # メッセージを型付きで用意
-        messages: list[EasyInputMessageParam] = [
-            EasyInputMessageParam(
-                role="developer",
-                content="Extract event details from the text."
-            ),
-            EasyInputMessageParam(
-                role="user",
-                content=[ResponseInputTextParam(type="input_text", text=text)],
-            ),
-        ]
-
-        # 3. parse helper を使用
-        client = OpenAI()
-        res = client.responses.parse(
-            model=model,
-            input=messages,
-            text_format=Event2,  # ← ここがポイント
-        )
-
-        # 4. 返却は自動で Event2 に！
-        try:
-            event: Event2 = res.output_parsed  # SDK が生成
-            st.subheader("抽出結果 (Pydantic)")
-            st.json(event.model_dump())
-            st.code(repr(event), language="python")
-        except (ValidationError, AttributeError) as ve:
-            st.error("Pydantic パースに失敗しました。")
-            st.exception(ve)
-
-
-# ==================================================
-# 01_04 関数呼び出し (OpenWeatherMap): Function calling by use json-format
-# ==================================================
-function_tool_param: FunctionToolParam = {
-    "name"       : "get_current_weather",
-    "description": "指定都市の現在の天気を返す",
-    "parameters" : {
-        "type"      : "object",
-        "properties": {
-            "location": {"type": "string"},
-            "unit"    : {"type": "string", "enum": ["celsius", "fahrenheit"]},
-        },
-        "required"  : ["location"],
-    },
-    "strict"     : True,
-    "type"       : "function",
-}
-
-
-def load_japanese_cities(csv_path: str) -> pd.DataFrame:
-    df = pd.read_csv(csv_path)
-    jp = df[df["country"] == "Japan"][["name", "lat", "lon"]].drop_duplicates()
-    return jp.sort_values("name").reset_index(drop=True)
-
-
-def select_city(df_jp: pd.DataFrame, demo_name: str = ""):
-    safe = sanitize_key(demo_name)
-    city = st.selectbox("都市を選択してください", df_jp["name"].tolist(), key=f"city_{safe}")
-    row = df_jp[df_jp["name"] == city].iloc[0]
-    return city, row["lat"], row["lon"]
-
-def get_current_weather_by_coords(lat: float, lon: float, unit: str = "metric"):
-    api_key = os.getenv("OPENWEATHER_API_KEY")
-    if not api_key:
-        raise RuntimeError("OPENWEATHER_API_KEY が設定されていません。")
-    url = f"http://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&appid={api_key}&units={unit}"
-    res = requests.get(url)
-    res.raise_for_status()
-    data = res.json()
+def get_weather_function_tool() -> FunctionToolParam:
+    """天気取得関数ツールの定義"""
     return {
-        "city"       : data["name"],
-        "temperature": data["main"]["temp"],
-        "description": data["weather"][0]["description"],
-        "coord"      : data["coord"],
+        "name"       : "get_current_weather",
+        "description": "指定都市の現在の天気を返す",
+        "parameters" : {
+            "type"      : "object",
+            "properties": {
+                "location": {"type": "string", "description": "都市名"},
+                "unit"    : {"type": "string", "enum": ["celsius", "fahrenheit"], "description": "温度単位"}
+            },
+            "required"  : ["location"],
+        },
+        "strict"     : True,
+        "type"       : "function",
     }
 
 
-def get_weekly_forecast(lat: float, lon: float, unit: str = "metric"):
-    api_key = os.getenv("OPENWEATHER_API_KEY")
-    if not api_key:
-        raise RuntimeError("OPENWEATHER_API_KEY が設定されていません。")
-    url = f"http://api.openweathermap.org/data/2.5/forecast?lat={lat}&lon={lon}&units={unit}&appid={api_key}"
-    res = requests.get(url)
-    res.raise_for_status()
-    data = res.json()
-    daily: dict[str, dict[str, list[float] | str]] = {}
-    for item in data["list"]:
-        date = item["dt_txt"].split(" ")[0]
-        temp = item["main"]["temp"]
-        weather = item["weather"][0]["description"]
-        daily.setdefault(date, {"temps": [], "weather": weather})["temps"].append(temp)
-    return [
-        {"date": d, "temp_avg": round(sum(v["temps"]) / len(v["temps"]), 1), "weather": v["weather"]}
-        for d, v in daily.items()
-    ]
+def load_japanese_cities() -> Optional[List[Dict[str, Any]]]:
+    """日本の都市データ読み込み"""
+    cities_path = config.get("paths.cities_csv", "data/cities_list.csv")
+    try:
+        import pandas as pd
+        df = pd.read_csv(cities_path)
+        jp_cities = df[df["country"] == "Japan"][["name", "lat", "lon"]].to_dict('records')
+        return jp_cities
+    except Exception as e:
+        logger.error(f"都市データ読み込みエラー: {e}")
+        return None
 
 
-def responses_01_04_function_calling(demo_name: str = "01_04_Function_Calling"):
-    init_messages(demo_name)
-    model = select_model(demo_name)
-    st.write("選択したモデル:", model)
+# ==================================================
+# メインデモクラス
+# ==================================================
+class ResponsesParseDemo:
+    """Responses API包括デモクラス"""
 
-    df_jp = load_japanese_cities("data/cities_list.csv")
-    city, lat, lon = select_city(df_jp, demo_name)
+    def __init__(self):
+        self.demo_name = "responses_parse_comprehensive"
+        self.message_manager = MessageManagerUI(f"messages_{self.demo_name}")
+        SessionStateManager.init_session_state()
 
-    today = get_current_weather_by_coords(lat, lon)
-    st.write("----- 本日の天気 -----")
-    st.write(f"都市 : {today['city']}")
-    st.write(f"気温 : {today['temperature']}℃")
-    st.write(f"説明 : {today['description']}")
+    def setup_sidebar(self, selected_model: str):
+        """サイドバーの設定"""
+        st.sidebar.write("情報パネル")
 
-    st.write("----- 5日間予報 （3時間毎を日別平均） -----")
-    for day in get_weekly_forecast(lat, lon):
-        st.write(f"{day['date']} : {day['temp_avg']}℃, {day['weather']}")
+        # 各情報パネルを表示
+        InfoPanelManager.show_api_info()
+        InfoPanelManager.show_model_capabilities(selected_model)
+        InfoPanelManager.show_demo_guide()
 
+        # 設定パネル
+        UIHelper.show_settings_panel()
 
-# --------------------------------------------------
-# 01_05　会話状態
-# --------------------------------------------------
-def responses_01_05_conversation(demo_name: str = "01_05_Conversation"):
-    init_messages(demo_name)
-    model = select_model(demo_name)
-    st.write("選択したモデル:", model)
+    @error_handler_ui
+    @timer_ui
+    def demo_parse_basic(self, selected_model: str):
+        """01_00: responses.parseの基本"""
+        st.subheader("responses.parse 基本デモ")
 
+        st.info("""
+        **responses.parse**は構造化された出力を生成する基本機能です。
+        テキストから人物情報を抽出してPydanticモデルで受け取ります。
+        """)
 
-# --------------------------------------------------
-# 01_06 Built-in Tools (FileSearch / WebSearch)
-# --------------------------------------------------
-def responses_01_06_tools_file_search(demo_name: str = "01_06_Extend_Model") -> None:
-    # FileSearch / WebSearch プレビュー デモ（改訂版）
-    init_messages(demo_name)
+        # サンプルテキスト
+        sample_text = config.get("samples.prompts.event_example",
+                                 "私の名前は田中太郎、30歳、東京在住です。友人は鈴木健太、28歳、大阪在住です。")
 
-    model = select_model(demo_name)
-    st.write("選択したモデル:", model)
-
-    # --- UI -----------------------------------------------------------
-    tool_choice = st.selectbox("ツール選択", ["file_search", "web_search_preview"], key=f"tool_{demo_name}")
-    query = st.text_input("クエリを入力", "", key=f"query_{demo_name}")
-
-    # FileSearch 用追加パラメータ
-    vector_store_id: str | None = None
-    max_results: int = 5
-    if tool_choice == "file_search":
-        vector_store_id = st.text_input("vector_store_id", "", key=f"vs_{demo_name}")
-        max_results = st.number_input("最大取得数", 1, 20, 5, key=f"max_{demo_name}")
-
-    # --- 実行 ---------------------------------------------------------
-    if st.button("送信（Tools）", key=f"btn_{demo_name}"):
-        client = OpenAI()
-
-        if tool_choice == "file_search":
-            # 1. FileSearchToolParam を生成
-            fs_tool = FileSearchToolParam(
-                type="file_search",
-                vector_store_ids=[vector_store_id] if vector_store_id else [],
-                max_num_results=int(max_results),
-            )
-
-            # 2. Responses API 呼び出し（検索結果を同時返却）
-            resp = client.responses.create(
-                model=model,
-                tools=[fs_tool],
-                input=query,
-                include=["file_search_call.results"],  # 🔑 ここが新規
-            )
-
-            # 3. 結果表示
-            st.subheader("モデル回答")
-            st.write(getattr(resp, "output_text", str(resp)))
-
-            st.subheader("FileSearch 結果")
-            if resp.file_search_call and resp.file_search_call.results:
-                st.json(resp.file_search_call.results)
-            else:
-                st.info("検索結果が返されませんでした。vector_store_id とクエリを確認してください。")
-
-        else:  # --- web_search_preview ----------------------------------
-            ws_tool = WebSearchToolParam(
-                type="web_search_preview",
-                search_context_size="medium",
-            )
-            resp = client.responses.create(model=model, tools=[ws_tool], input=query)
-            st.subheader("モデル回答")
-            st.write(getattr(resp, "output_text", str(resp)))
-
-
-# --------------------------------------------------
-# 01_061 Built-in Tools (FileSearch)
-# 想定シナリオ
-# ------------
-# FileSearch
-# 自前でアップロードしたファイル（PDF／MD／DOCX など）を対象に、
-# ベクトル検索 + キーワード検索を行い、モデル回答の根拠となるテキストや引用を取り出す
-# 社内マニュアルや研究論文の Q&A、FAQ ボット、RAG 構築
-# ------------
-# 2. FileSearch の機能
-# ・ベクトルストア連携: 事前に vector_store を作成し、files.upload() で文書を追加→自動埋め込み。
-# ・意味検索 + キーワード検索: GPT‑4o がクエリを生成→ストアを検索→最適なチャンクを取得。
-# ・ファイル引用: モデル出力に file_citation アノテーションを付与し、根拠箇所を示す。
-# ・検索結果取得: include=["file_search_call.results"] を指定すると、
-# 　検索結果メタデータ（スコア・抜粋テキスト）を JSON で受け取れる。
-# ・メタデータフィルタ: アップロード時に付与した属性（例: {"type":"pdf"}）で絞り込み可能。
-# --------------------------------------------------
-def responses_01_061_filesearch(demo_name: str = "01_061_filesearch") -> None:
-    init_messages(demo_name)
-    model = select_model(demo_name)
-    vector_store_id = 'vs_68345a403a548191817b3da8404e2d82'
-
-    fs_tool = FileSearchToolParam(
-        type="file_search",
-        vector_store_ids=[vector_store_id],
-        max_num_results=20
-    )
-    client = OpenAI()
-    resp = client.responses.create(
-        model=model,
-        tools=[fs_tool],
-        input="請求書の支払い期限は？",
-        include=["file_search_call.results"]
-    )
-    st.write(resp.output_text)
-
-
-# --------------------------------------------------
-# WebSearch
-# インターネット上の最新情報を取得し、モデルの知識をリアルタイムで拡張する
-# ニュースの要約、最新統計の取得、競合リサーチ、株価・スポーツ速報
-# --------------------------------------------------
-# 3. WebSearch の機能
-# 外部検索エンジン: モデルが裏側で Bing / DuckDuckGo API などを使用してクエリを発行。
-# 検索文脈サイズ: search_context_size（"small" / "medium" / "large"）で取得記事数と抜粋長を調整。
-# 要約 + 引用: モデルは取得したページの要約と URL 引用を含めた回答を生成。
-# --------------------------------------------------
-def responses_01_062_websearch(demo_name: str = "01_062_websearch") -> None:
-    init_messages(demo_name)
-    model = select_model(demo_name)
-
-    user_location = UserLocation(
-        type="approximate",
-        country="JP",
-        city="Tokyo",
-        region="Tokyo"
-    )
-
-    ws_tool = WebSearchToolParam(
-        type="web_search_preview",
-        user_location=user_location,
-        search_context_size="high"  # "low", "medium", または "high"
-    )
-
-    client = OpenAI()
-    # ★ モデルは gpt-4o または gpt-4o-mini にしてください
-    response = client.responses.create(
-        model=model,  # ここを修正
-        tools=[ws_tool],
-        input="週末の東京の天気とおすすめの屋内アクティビティは？"
-    )
-    st.write(response.output_text)
-
-# --------------------------------------------------
-# computer_use_tool_param
-# --------------------------------------------------
-def responses_01_07_computer_use_tool_param():
-    client = OpenAI()
-
-    # --自動実行の指示-------------------------------------------
-    cu_tool = ComputerToolParam(
-        type="computer_use_preview",  # fixed literal
-        display_width=1280,
-        display_height=800,
-        environment="browser",  # "browser", "mac", "windows", or "ubuntu"
-    )
-
-    # 必須: EasyInputMessageParam を利用する（OpenAI API v1 仕様）
-    messages = [
-        EasyInputMessageParam(
-            role="user",
-            content=[
-                ResponseInputTextParam(
-                    type="input_text",
-                    text="ブラウザで https://news.ycombinator.com を開いて、トップ記事のタイトルをコピーしてメモ帳に貼り付けて"
-                )
-            ]
+        user_input, submitted = UIHelper.create_input_form(
+            key="parse_basic_form",
+            label="人物情報を含むテキストを入力してください",
+            submit_label="構造化",
+            value=sample_text,
+            help="名前、年齢、住所が含まれるテキストを入力"
         )
-    ]
 
-    response = client.responses.create(
-        model="computer-use-preview",  # dedicated hosted‑tool model
-        tools=[cu_tool],
-        input=messages,
-        truncation="auto",  # MUST be "auto" for this model
-        stream=False,  # optional
-        include=["computer_call_output.output.image_url"]  # block name: ComputerUseはこれ
-    )
-    import pprint
-    pprint.pprint(response)
-    # --------------------------------------------
-    # 自動実行
-    # --------------------------------------------
-    for output in response.output:
-        if hasattr(output, 'type') and output.type == 'computer_call':
-            # 画像取得や操作内容表示
-            if hasattr(output, 'action'):
-                print('Action:', output.action)
-            if hasattr(output, 'image_url'):
-                print('Image URL:', output.image_url)
+        # スキーマ表示
+        with st.expander("出力スキーマ", expanded=False):
+            st.code("""
+class UserInfo(BaseModel):
+    name: str = Field(..., description="ユーザー名")
+    age: int = Field(..., ge=0, le=150, description="年齢") 
+    city: str = Field(..., description="居住都市")
 
+class People(BaseModel):
+    users: List[UserInfo] = Field(..., description="ユーザー一覧")
+    total_count: int = Field(..., description="総人数")
+            """, language="python")
 
-# responses_01_07_computer_use_tool_param()
+        if submitted and user_input:
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+
+            try:
+                status_text.text("メッセージを準備中...")
+                progress_bar.progress(25)
+
+                messages = [
+                    EasyInputMessageParam(
+                        role="developer",
+                        content="あなたは情報抽出の専門家です。テキストから人物情報を抽出してください。"
+                    ),
+                    EasyInputMessageParam(
+                        role="user",
+                        content=[ResponseInputTextParam(type="input_text", text=user_input)]
+                    )
+                ]
+
+                status_text.text("構造化データを生成中...")
+                progress_bar.progress(70)
+
+                client = OpenAIClient()
+                response = client.client.responses.parse(
+                    model=selected_model,
+                    input=messages,
+                    text_format=People
+                )
+
+                status_text.text("構造化完了!")
+                progress_bar.progress(100)
+
+                # 結果表示
+                if hasattr(response, 'output_parsed'):
+                    people: People = response.output_parsed
+
+                    st.success(f"🎉 {people.total_count}人の情報を抽出しました!")
+
+                    # 人物情報表示
+                    for i, person in enumerate(people.users, 1):
+                        with st.container():
+                            st.write(f"**Person {i}**")
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                st.write("名前:", person.name)
+                            with col2:
+                                st.write("年齢:", f"{person.age}歳")
+                            with col3:
+                                st.write("居住地:", person.city)
+                            st.divider()
+
+                    # JSON出力
+                    with st.expander("📊 JSON出力", expanded=False):
+                        st.json(people.model_dump())
+
+                        UIHelper.create_download_button(
+                            people.model_dump(),
+                            "extracted_people.json",
+                            "application/json",
+                            "JSONダウンロード"
+                        )
+
+            except Exception as e:
+                st.error(f"構造化エラー: {str(e)}")
+                logger.error(f"Parse basic error: {e}")
+            finally:
+                progress_bar.empty()
+                status_text.empty()
+
+    @error_handler_ui
+    @timer_ui
+    def demo_create_basic(self, selected_model: str):
+        """01_01: responses.create 基本"""
+        st.subheader("responses.create 基本デモ")
+
+        st.info("""
+        **responses.create**は最も基本的なAPI呼び出しです。
+        自然言語での質問に対してモデルが回答します。
+        """)
+
+        user_input, submitted = UIHelper.create_input_form(
+            key="create_basic_form",
+            label="質問を入力してください",
+            submit_label="送信",
+            placeholder="例: OpenAIのAPIについて教えて",
+            help="何でも気軽に質問してください"
+        )
+
+        if submitted and user_input:
+            # トークン数チェック
+            token_count = TokenManager.count_tokens(user_input, selected_model)
+            UIHelper.show_token_info(user_input, selected_model)
+
+            limits = TokenManager.get_model_limits(selected_model)
+            if token_count > limits['max_tokens'] * 0.8:
+                st.warning(f"入力が長すぎます ({token_count:,} トークン)")
+                return
+
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+
+            try:
+                status_text.text("メッセージを準備中...")
+                progress_bar.progress(20)
+
+                messages = self.message_manager.get_default_messages()
+                messages.append(EasyInputMessageParam(role="user", content=user_input))
+
+                status_text.text("AIが回答を生成中...")
+                progress_bar.progress(50)
+
+                client = OpenAIClient()
+                response = client.create_response(messages, model=selected_model)
+
+                status_text.text("完了!")
+                progress_bar.progress(100)
+
+                # 回答表示
+                ResponseProcessorUI.display_response(response, show_details=True)
+
+                # メッセージ履歴に追加
+                self.message_manager.add_message("user", user_input)
+                texts = ResponseProcessorUI.extract_text(response)
+                if texts:
+                    self.message_manager.add_message("assistant", texts[0])
+
+            except Exception as e:
+                st.error(f"エラーが発生しました: {str(e)}")
+                logger.error(f"Create basic error: {e}")
+            finally:
+                progress_bar.empty()
+                status_text.empty()
+
+    @error_handler_ui
+    @timer_ui
+    def demo_memory_conversation(self, selected_model: str):
+        """01_011: 履歴付き会話"""
+        st.subheader("履歴付き会話デモ")
+
+        st.info("""
+        **履歴付き会話**では前の会話内容を記憶して連続的な対話が可能です。
+        """)
+
+        # 現在の履歴表示
+        messages = self.message_manager.get_messages()
+        if len(messages) > 3:  # デフォルトメッセージ以外がある場合
+            with st.expander("会話履歴", expanded=True):
+                UIHelper.display_messages(messages, show_system=False)
+
+        user_input, submitted = UIHelper.create_input_form(
+            key="memory_form",
+            label="続きの質問を入力してください",
+            submit_label="送信",
+            help="前の会話を覚えているので、続きの質問ができます"
+        )
+
+        if submitted and user_input:
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+
+            try:
+                status_text.text("会話履歴を含めて処理中...")
+                progress_bar.progress(30)
+
+                # 履歴にユーザーメッセージを追加
+                self.message_manager.add_message("user", user_input)
+
+                status_text.text("AIが回答を生成中...")
+                progress_bar.progress(70)
+
+                # 全履歴でAPI呼び出し
+                client = OpenAIClient()
+                response = client.create_response(
+                    self.message_manager.get_messages(),
+                    model=selected_model
+                )
+
+                status_text.text("完了!")
+                progress_bar.progress(100)
+
+                # 回答表示
+                ResponseProcessorUI.display_response(response, show_details=True)
+
+                # アシスタント回答を履歴に追加
+                texts = ResponseProcessorUI.extract_text(response)
+                if texts:
+                    self.message_manager.add_message("assistant", texts[0])
+
+                st.rerun()
+
+            except Exception as e:
+                st.error(f"会話エラー: {str(e)}")
+                logger.error(f"Memory conversation error: {e}")
+            finally:
+                progress_bar.empty()
+                status_text.empty()
+
+        # 履歴管理
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🗑️ 履歴クリア", key="memory_clear"):
+                self.message_manager.clear_messages()
+                st.rerun()
+        with col2:
+            message_count = len(messages) - 3  # デフォルトメッセージを除く
+            st.metric("会話数", max(0, message_count))
+
+    @error_handler_ui
+    @timer_ui
+    def demo_image_url(self, selected_model: str):
+        """01_02: 画像入力(URL)"""
+        st.subheader("画像入力(URL)デモ")
+
+        st.info("""
+        **画像URL入力**でWeb上の画像を解析できます。
+        画像の内容を理解して質問に回答します。
+        """)
+
+        # デフォルト画像URL
+        default_url = config.get("samples.images.nature",
+                                 "https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Gfp-wisconsin-madison-the-nature-boardwalk.jpg/2560px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg")
+
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            image_url = st.text_input(
+                "画像URLを入力してください",
+                value=default_url,
+                help="解析したい画像のURLを指定"
+            )
+        with col2:
+            question = st.text_input(
+                "質問内容",
+                value="この画像を説明してください",
+                help="画像に関する質問"
+            )
+
+        # 画像プレビュー
+        if image_url:
+            try:
+                st.image(image_url, caption="解析対象画像", width=400)
+            except Exception:
+                st.warning("画像のプレビューに失敗しました")
+
+        if st.button("画像解析実行", key="image_url_analyze"):
+            if not image_url:
+                st.error("画像URLを入力してください")
+                return
+
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+
+            try:
+                status_text.text("画像を読み込み中...")
+                progress_bar.progress(30)
+
+                messages = [
+                    EasyInputMessageParam(
+                        role="user",
+                        content=[
+                            ResponseInputTextParam(type="input_text", text=question),
+                            ResponseInputImageParam(type="input_image", image_url=image_url, detail="auto")
+                        ]
+                    )
+                ]
+
+                status_text.text("AIが画像を解析中...")
+                progress_bar.progress(70)
+
+                client = OpenAIClient()
+                response = client.create_response(messages, model=selected_model)
+
+                status_text.text("解析完了!")
+                progress_bar.progress(100)
+
+                # 結果表示
+                ResponseProcessorUI.display_response(response, show_details=True)
+
+            except Exception as e:
+                st.error(f"画像解析エラー: {str(e)}")
+                logger.error(f"Image URL analysis error: {e}")
+            finally:
+                progress_bar.empty()
+                status_text.empty()
+
+    @error_handler_ui
+    @timer_ui
+    def demo_image_base64(self, selected_model: str):
+        """01_021: 画像入力(Base64)"""
+        st.subheader("画像入力(Base64)デモ")
+
+        st.info("""
+        **ローカル画像ファイル**をアップロードして解析できます。
+        Base64エンコードして送信します。
+        """)
+
+        # ファイルアップローダー
+        uploaded_file = st.file_uploader(
+            "画像ファイルを選択してください",
+            type=['png', 'jpg', 'jpeg', 'webp', 'gif'],
+            help="対応形式: PNG, JPG, JPEG, WebP, GIF"
+        )
+
+        question = st.text_input(
+            "質問内容",
+            value="この画像について詳しく説明してください",
+            key="base64_question"
+        )
+
+        if uploaded_file and question:
+            # 画像プレビュー
+            st.image(uploaded_file, caption="アップロード画像", width=400)
+
+            if st.button("画像解析実行", key="image_base64_analyze"):
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+
+                try:
+                    status_text.text("ファイルを読み込み中...")
+                    progress_bar.progress(20)
+
+                    # Base64エンコード
+                    image_bytes = uploaded_file.read()
+                    b64_string = base64.b64encode(image_bytes).decode()
+
+                    status_text.text("Base64エンコード完了...")
+                    progress_bar.progress(40)
+
+                    # データURLを作成
+                    mime_type = f"image/{uploaded_file.type.split('/')[-1]}"
+                    data_url = f"data:{mime_type};base64,{b64_string}"
+
+                    messages = [
+                        EasyInputMessageParam(
+                            role="user",
+                            content=[
+                                ResponseInputTextParam(type="input_text", text=question),
+                                ResponseInputImageParam(type="input_image", image_url=data_url, detail="auto")
+                            ]
+                        )
+                    ]
+
+                    status_text.text("🤖 AI が画像を解析中...")
+                    progress_bar.progress(70)
+
+                    client = OpenAIClient()
+                    response = client.create_response(messages, model=selected_model)
+
+                    status_text.text("解析完了!")
+                    progress_bar.progress(100)
+
+                    # 結果表示
+                    ResponseProcessorUI.display_response(response, show_details=True)
+
+                except Exception as e:
+                    st.error(f"画像解析エラー: {str(e)}")
+                    logger.error(f"Image base64 analysis error: {e}")
+                finally:
+                    progress_bar.empty()
+                    status_text.empty()
+
+    @error_handler_ui
+    @timer_ui
+    def demo_structured_output(self, selected_model: str):
+        """01_03: 構造化出力"""
+        st.subheader("構造化出力デモ")
+
+        st.info("""
+        **構造化出力**では事前に定義したJSONスキーマに従って
+        モデルの出力を構造化できます。
+        """)
+
+        # サンプルテキスト
+        sample_text = "台湾フェス2025 ～あつまれ！究極の台湾グルメ～ in Kawasaki Spark（5/3・5/4開催）参加者：王さん、林さん、佐藤さん"
+
+        user_input, submitted = UIHelper.create_input_form(
+            key="structured_form",
+            label="イベント詳細を入力してください",
+            submit_label="構造化",
+            value=sample_text,
+            help="イベント名、日付、参加者が含まれるテキスト"
+        )
+
+        # スキーマ表示
+        with st.expander("JSONスキーマ", expanded=False):
+            schema = {
+                "type"                : "object",
+                "properties"          : {
+                    "name"        : {"type": "string"},
+                    "date"        : {"type": "string"},
+                    "participants": {"type": "array", "items": {"type": "string"}}
+                },
+                "required"            : ["name", "date", "participants"],
+                "additionalProperties": False
+            }
+            st.json(schema)
+
+        if submitted and user_input:
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+
+            try:
+                status_text.text("構造化プロンプトを準備中...")
+                progress_bar.progress(25)
+
+                messages = [
+                    EasyInputMessageParam(role="developer", content="Extract event details from the text."),
+                    EasyInputMessageParam(role="user",
+                                          content=[ResponseInputTextParam(type="input_text", text=user_input)])
+                ]
+
+                # 構造化設定
+                schema = {
+                    "type"                : "object",
+                    "properties"          : {
+                        "name"        : {"type": "string"},
+                        "date"        : {"type": "string"},
+                        "participants": {"type": "array", "items": {"type": "string"}}
+                    },
+                    "required"            : ["name", "date", "participants"],
+                    "additionalProperties": False
+                }
+
+                text_cfg = ResponseTextConfigParam(
+                    format=ResponseFormatTextJSONSchemaConfigParam(
+                        name="event_extraction",
+                        type="json_schema",
+                        schema=schema,
+                        strict=True,
+                    )
+                )
+
+                status_text.text("構造化データを生成中...")
+                progress_bar.progress(70)
+
+                client = OpenAIClient()
+                response = client.client.responses.create(
+                    model=selected_model,
+                    input=messages,
+                    text=text_cfg
+                )
+
+                status_text.text("構造化完了!")
+                progress_bar.progress(100)
+
+                # 結果処理
+                try:
+                    event_data = json.loads(response.output_text)
+                    event = Event.model_validate(event_data)
+
+                    st.success("イベント情報を構造化しました!")
+
+                    # 構造化データ表示
+                    col1, col2 = st.columns([2, 1])
+
+                    with col1:
+                        st.write("**イベント情報**")
+                        st.write(f"**名称**: {event.name}")
+                        st.write(f"**日程**: {event.date}")
+                        st.write("**参加者**:")
+                        for participant in event.participants:
+                            st.write(f"  - {participant}")
+
+                    with col2:
+                        st.write("**📊 JSON出力**")
+                        st.json(event.model_dump())
+
+                    # ダウンロード
+                    UIHelper.create_download_button(
+                        event.model_dump(),
+                        "event_data.json",
+                        "application/json",
+                        "📥 JSONダウンロード"
+                    )
+
+                except Exception as parse_error:
+                    st.error(f"構造化データの解析に失敗: {parse_error}")
+                    st.write("Raw response:")
+                    st.code(response.output_text)
+
+            except Exception as e:
+                st.error(f"構造化エラー: {str(e)}")
+                logger.error(f"Structured output error: {e}")
+            finally:
+                progress_bar.empty()
+                status_text.empty()
+
+    @error_handler_ui
+    @timer_ui
+    def demo_function_calling(self, selected_model: str):
+        """01_04: 関数呼び出し"""
+        st.subheader("関数呼び出しデモ")
+
+        st.info("""
+        **Function Calling**では外部の関数をモデルが自動的に呼び出せます。
+        ここでは天気情報取得の例を示します。
+        """)
+
+        # 都市選択
+        cities_data = load_japanese_cities()
+        if not cities_data:
+            st.error("都市データの読み込みに失敗しました")
+            return
+
+        city_names = [city["name"] for city in cities_data]
+        selected_city = st.selectbox(
+            "都市を選択してください",
+            city_names,
+            help="天気を取得したい都市を選択"
+        )
+
+        # 関数ツール定義表示
+        with st.expander("🔧 関数定義", expanded=False):
+            function_tool = get_weather_function_tool()
+            st.json(function_tool)
+
+        user_query = st.text_input(
+            "天気に関する質問",
+            value=f"{selected_city}の天気はどうですか？",
+            help="天気について自然言語で質問"
+        )
+
+        if st.button("🌤️ 天気取得実行", key="function_call"):
+            if not user_query:
+                st.error("質問を入力してください")
+                return
+
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+
+            try:
+                status_text.text("関数ツールを準備中...")
+                progress_bar.progress(20)
+
+                # 関数ツール定義
+                function_tool = get_weather_function_tool()
+
+                messages = [
+                    EasyInputMessageParam(
+                        role="developer",
+                        content="あなたは天気情報を提供するアシスタントです。必要に応じて関数を呼び出してください。"
+                    ),
+                    EasyInputMessageParam(role="user", content=user_query)
+                ]
+
+                status_text.text("AI が関数呼び出しを判断中...")
+                progress_bar.progress(60)
+
+                client = OpenAIClient()
+                response = client.client.responses.create(
+                    model=selected_model,
+                    input=messages,
+                    tools=[function_tool]
+                )
+
+                status_text.text("関数呼び出し完了!")
+                progress_bar.progress(100)
+
+                # 結果表示
+                ResponseProcessorUI.display_response(response, show_details=True)
+
+                # 関数呼び出し詳細
+                if hasattr(response, 'output'):
+                    for output in response.output:
+                        if hasattr(output, 'type') and output.type == 'function_call':
+                            st.write("**🔧 関数呼び出し詳細**")
+                            st.write(f"- 関数名: `{output.name}`")
+                            if hasattr(output, 'arguments'):
+                                st.write(f"- 引数: `{output.arguments}`")
+
+            except Exception as e:
+                st.error(f"関数呼び出しエラー: {str(e)}")
+                logger.error(f"Function calling error: {e}")
+            finally:
+                progress_bar.empty()
+                status_text.empty()
+
+    @error_handler_ui
+    @timer_ui
+    def demo_web_search(self, selected_model: str):
+        """01_062: Web検索"""
+        st.subheader("Web検索デモ")
+
+        st.info("""
+        **Web Search**では最新のWeb情報を検索して回答に反映できます。
+        リアルタイムの情報取得が可能です。
+        """)
+
+        # 検索設定
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            search_query = st.text_input(
+                "検索クエリを入力してください",
+                value=config.get("samples.prompts.weather_query", "今日の東京の天気"),
+                help="検索したい内容を自然言語で入力"
+            )
+        with col2:
+            search_size = st.selectbox(
+                "検索サイズ",
+                ["low", "medium", "high"],
+                index=1,
+                help="検索結果の詳細度"
+            )
+
+        if st.button("Web検索実行", key="web_search"):
+            if not search_query:
+                st.error("検索クエリを入力してください")
+                return
+
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+
+            try:
+                status_text.text("Web検索ツールを準備中...")
+                progress_bar.progress(20)
+
+                # Web検索ツール設定
+                user_location = UserLocation(
+                    type="approximate",
+                    country="JP",
+                    city="Tokyo",
+                    region="Tokyo"
+                )
+
+                ws_tool = WebSearchToolParam(
+                    type="web_search_preview",
+                    user_location=user_location,
+                    search_context_size=search_size
+                )
+
+                status_text.text("Web検索を実行中...")
+                progress_bar.progress(60)
+
+                client = OpenAIClient()
+                response = client.client.responses.create(
+                    model=selected_model,
+                    tools=[ws_tool],
+                    input=search_query
+                )
+
+                status_text.text("検索完了!")
+                progress_bar.progress(100)
+
+                # 結果表示
+                ResponseProcessorUI.display_response(response, show_details=True)
+
+            except Exception as e:
+                st.error(f"Web検索エラー: {str(e)}")
+                logger.error(f"Web search error: {e}")
+            finally:
+                progress_bar.empty()
+                status_text.empty()
+
+    def show_message_history(self):
+        """メッセージ履歴表示"""
+        st.subheader("会話履歴")
+
+        messages = self.message_manager.get_messages()
+        if messages:
+            # 履歴表示
+            UIHelper.display_messages(messages, show_system=True)
+
+            # 履歴操作
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                if st.button("履歴クリア"):
+                    self.message_manager.clear_messages()
+                    st.rerun()
+            with col2:
+                if st.button("履歴エクスポート"):
+                    export_data = self.message_manager.export_messages_ui()
+                    UIHelper.create_download_button(
+                        export_data,
+                        "chat_history.json",
+                        "application/json",
+                        "保存"
+                    )
+            with col3:
+                message_count = len(messages) - 3  # デフォルトメッセージを除く
+                st.write("会話数", max(0, message_count))
+            with col4:
+                total_tokens = sum(TokenManager.count_tokens(str(msg.get("content", ""))) for msg in messages)
+                st.write("総トークン", f"{total_tokens:,}")
+        else:
+            st.info("会話履歴がありません")
+
+    def run(self):
+        """メインデモ実行"""
+        # ページ初期化
+        init_page("Responses API デモ", sidebar_title="📋 情報パネル")
+
+        # モデル選択
+        selected_model = select_model(self.demo_name)
+
+        # サイドバー設定
+        self.setup_sidebar(selected_model)
+
+        # メイン画面
+        st.markdown("""
+        #### 概要
+        OpenAI Responses APIの包括的なデモアプリケーションです。
+        基本機能から高度な機能まで様々なユースケースを体験できます。
+        """)
+
+        # タブでデモを分離
+        tabs = st.tabs([
+            "Parse Basic",
+            "Create",
+            "Memory",
+            "Image URL",
+            "Image File",
+            "Structured",
+            "Function",
+            "Web Search",
+            "履歴"
+        ])
+
+        with tabs[0]:
+            self.demo_parse_basic(selected_model)
+
+        with tabs[1]:
+            self.demo_create_basic(selected_model)
+
+        with tabs[2]:
+            self.demo_memory_conversation(selected_model)
+
+        with tabs[3]:
+            self.demo_image_url(selected_model)
+
+        with tabs[4]:
+            self.demo_image_base64(selected_model)
+
+        with tabs[5]:
+            self.demo_structured_output(selected_model)
+
+        with tabs[6]:
+            self.demo_function_calling(selected_model)
+
+        with tabs[7]:
+            self.demo_web_search(selected_model)
+
+        with tabs[8]:
+            self.show_message_history()
+
+        # フッター
+        st.markdown("---")
+        st.markdown("""
+        <div style='text-align: center; color: gray;'>
+        新しいヘルパーモジュールを使用 | 
+        左ペインで詳細情報を確認できます |
+        OpenAI Responses APIデモ
+        </div>
+        """, unsafe_allow_html=True)
+
 
 # ==================================================
-# メインルーティン
+# メイン実行部
 # ==================================================
-def main() -> None:
-    init_page("core concept")
+def main():
+    """メイン関数"""
+    try:
+        demo = ResponsesParseDemo()
+        demo.run()
+    except Exception as e:
+        st.error(f"アプリケーションエラー: {str(e)}")
+        logger.error(f"Application error: {e}")
 
-    page_funcs = {
-        "01_00 responses.parseの基本"        : responses_parse_basic,
-        "01_01  Responsesサンプル(One Shot)" : responses_sample,
-        "01_011 Responsesサンプル(History)"   : responses_memory_sample,
-        "01_02  画像入力(URL)"               : responses_01_02_passing_url,
-        "01_021 画像入力(base64)"            : responses_01_021_base64_image,
-        "01_03  構造化出力-responses"        : responses_01_03_structured_output,
-        "01_031 構造化出力-parse"            : responses_01_031_structured_output,
-        "01_04  関数 calling"                : responses_01_04_function_calling,
-        "01_05  会話状態"                    : responses_01_05_conversation,
-        "01_06  ツール:FileSearch, WebSearch": responses_01_06_tools_file_search,
-        "01_061 File Search"                 : responses_01_061_filesearch,
-        "01_062 Web Search"                  : responses_01_062_websearch,
-        "01_07  Computer Use Tool Param"     : responses_01_07_computer_use_tool_param,
-    }
-    demo_name = st.sidebar.radio("デモを選択", list(page_funcs.keys()))
-    st.session_state.current_demo = demo_name
-    page_funcs[demo_name](demo_name)
+        if config.get("experimental.debug_mode", False):
+            st.exception(e)
 
 
 if __name__ == "__main__":
     main()
 
-# streamlit run a20_01_responses_parse.py --server.port 8501
+# streamlit run a20_01_responses_parse.py --server.port=8501
